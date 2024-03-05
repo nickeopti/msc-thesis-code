@@ -1,6 +1,6 @@
-import math
-
+import jax.numpy as jnp
 import lightning
+import numpy as np
 import torch
 import torch.utils.data
 
@@ -11,33 +11,8 @@ def f(xs, ts):
     return torch.zeros_like(xs)
 
 def sigma_inverse(xs, ts):
-    return torch.ones_like(xs)
-
-
-class Wrapper(torch.nn.Module):
-    def __init__(self, module) -> None:
-        super().__init__()
-
-        self.module = module
-
-    def forward(self, batch):
-        xs, ts = batch
-        ys = self.module(xs)
-        return ys, ts
-
-
-class PositionalEncoding(torch.nn.Module):
-    def forward(self, batch) -> torch.Tensor:
-        xs, ts = batch
-        _, dim = xs.shape
-
-        self.encoding = torch.zeros_like(xs)
-        div_term = torch.exp(torch.arange(0, dim, 2) * (-math.log(100.0) / dim))
-        self.encoding[:, 0::2] = torch.sin(ts.unsqueeze(1) * div_term)
-        if self.encoding.shape[1] > 1:
-            self.encoding[:, 1::2] = torch.cos(ts.unsqueeze(1) * div_term)
-
-        return xs + self.encoding, ts
+    # return torch.ones_like(xs)
+    return torch.eye(xs.shape[-1]).unsqueeze(0).repeat(xs.shape[0], 1, 1)
 
 
 class Model(lightning.LightningModule):
@@ -47,33 +22,35 @@ class Model(lightning.LightningModule):
         self.delta_t = delta_t
 
         self.net = torch.nn.Sequential(
-            Wrapper(torch.nn.Linear(1, 16)),
-            Wrapper(torch.nn.ELU()),
-            PositionalEncoding(),
-            Wrapper(torch.nn.Linear(16, 32)),
-            Wrapper(torch.nn.ELU()),
-            PositionalEncoding(),
-            Wrapper(torch.nn.Linear(32, 16)),
-            Wrapper(torch.nn.ELU()),
-            PositionalEncoding(),
-            Wrapper(torch.nn.Linear(16, 1))
+            torch.nn.Linear(3, 16),
+            torch.nn.GELU(),
+            torch.nn.Linear(16, 32),
+            torch.nn.GELU(),
+            torch.nn.Linear(32, 16),
+            torch.nn.GELU(),
+            torch.nn.Linear(16, 2)
         )
 
+    def forward(self, xs: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
+        stacked = torch.vstack((xs.T, ts)).T
+        score_prediction = self.net(stacked)
+        return score_prediction / ts.reshape(-1, 1)
+
     def training_step(self, batch, _):
-        ts, xs = batch
-        score_prediction, _ = self.net((xs[1:].view(-1, 1), ts[1:]))
-        loss = (score_prediction.view(-1) + sigma_inverse(xs[:-1], ts[1:]) * (xs[1:] - xs[:-1] - f(xs[:-1], ts[1:]) * self.delta_t) / self.delta_t)**2
+        ts, xs, v = batch
+        score_prediction = self(xs[1:], ts[1:])
+        loss = (score_prediction + torch.bmm(sigma_inverse(xs[:-1], ts[1:]), (xs[1:] - xs[:-1] - f(xs[:-1], ts[1:]) * self.delta_t).unsqueeze(-1)).squeeze() / self.delta_t)**2
         loss = loss.mean()
 
         self.log('train_loss', loss)
         return loss
     
     def validation_step(self, batch, _):
-        ts, xs = batch
-        score_prediction, _ = self.net((xs[1:].view(-1, 1), ts[1:]))
-        score = -sigma_inverse(xs[1:], ts[1:]) * xs[1:] / ts[1:]
+        ts, xs, v = batch
+        score_prediction = self(xs[1:], ts[1:])
+        score = -torch.bmm(sigma_inverse(xs[1:], ts[1:]), (xs[1:] - v).unsqueeze(-1)).squeeze() / ts[1:].reshape(-1, 1)
 
-        loss = torch.mean((score_prediction.view(-1) - score)**2)
+        loss = torch.mean((score_prediction - score)**2)
         self.log('val_loss', loss)
 
     def configure_optimizers(self):
@@ -89,7 +66,15 @@ class Dataset:
         return self.n
     
     def __getitem__(self, index):
-        return diffusion.get_data()
+        match index % 3:
+            case 0:
+                y0 = jnp.zeros(2)
+            case 1:
+                y0 = jnp.ones(2) * 2
+            case 2:
+                y0 = jnp.array((2, -1))
+
+        return *diffusion.get_data(y0=y0), torch.tensor(np.asarray(y0))
 
 
 if __name__ == '__main__':
