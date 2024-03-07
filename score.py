@@ -1,90 +1,105 @@
+import jax
 import jax.numpy as jnp
-import lightning
-import numpy as np
-import torch
-import torch.utils.data
+import optax
+from flax import linen as nn
+from flax.training import train_state
 
 import diffusion
+import process
+import trainer
 
 
-def f(xs, ts):
-    return torch.zeros_like(xs)
+class Model(trainer.Module):
+    dp: process.Diffusion
+    learning_rate: float = 1e-3
 
-def sigma_inverse(xs, ts):
-    # return torch.ones_like(xs)
-    return torch.eye(xs.shape[-1]).unsqueeze(0).repeat(xs.shape[0], 1, 1)
+    @nn.compact
+    def __call__(self, t, y):
+        z = nn.Sequential(
+            [
+                nn.Dense(16),
+                nn.gelu,
+                nn.Dense(32),
+                nn.gelu,
+                nn.Dense(16),
+                nn.gelu,
+                nn.Dense(self.dp.d)
+            ]
+        )(y)
 
+        return z / t[:, None]
 
-class Model(lightning.LightningModule):
-    def __init__(self, delta_t: float = 0.01) -> None:
-        super().__init__()
+    @staticmethod
+    @jax.jit
+    def training_step(params, state: train_state.TrainState, dp: process.Diffusion, ts, ys, v):
+        ps = state.apply_fn(params, ts[1:], ys[1:])
 
-        self.delta_t = delta_t
+        def loss(p, t, y, y_next, dt):
+            return jnp.linalg.norm(p + dp.inverse_diffusion(t, y) @ (y_next - y - dp.drift(t, y) * dt) / dt)**2
 
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(3, 16),
-            torch.nn.GELU(),
-            torch.nn.Linear(16, 32),
-            torch.nn.GELU(),
-            torch.nn.Linear(32, 16),
-            torch.nn.GELU(),
-            torch.nn.Linear(16, 2)
-        )
+        l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
+        return jnp.mean(l)
 
-    def forward(self, xs: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
-        stacked = torch.vstack((xs.T, ts)).T
-        score_prediction = self.net(stacked)
-        return score_prediction / ts.reshape(-1, 1)
+    @staticmethod
+    @jax.jit
+    def validation_step(params, state: train_state.TrainState, dp: process.Diffusion, ts, ys, v):
+        ps = state.apply_fn(params, ts[1:], ys[1:])
 
-    def training_step(self, batch, _):
-        ts, xs, v = batch
-        score_prediction = self(xs[1:], ts[1:])
-        loss = (score_prediction + torch.bmm(sigma_inverse(xs[:-1], ts[1:]), (xs[1:] - xs[:-1] - f(xs[:-1], ts[1:]) * self.delta_t).unsqueeze(-1)).squeeze() / self.delta_t)**2
-        loss = loss.mean()
+        def loss(p, t, y):
+            psi = -dp.inverse_diffusion(t, y) @ (y - v) / t
+            return jnp.linalg.norm(p - psi)**2
 
-        self.log('train_loss', loss)
-        return loss
-    
-    def validation_step(self, batch, _):
-        ts, xs, v = batch
-        score_prediction = self(xs[1:], ts[1:])
-        score = -torch.bmm(sigma_inverse(xs[1:], ts[1:]), (xs[1:] - v).unsqueeze(-1)).squeeze() / ts[1:].reshape(-1, 1)
+        l = jax.vmap(loss)(ps, ts[1:], ys[1:])
+        return jnp.mean(l)
 
-        loss = torch.mean((score_prediction - score)**2)
-        self.log('val_loss', loss)
+    def initialise_params(self, rng):
+        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d)))
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-        return optimizer
+        return optax.adam(self.learning_rate)
 
 
 class Dataset:
-    def __init__(self, n: int) -> None:
+    def __init__(self, key, dp: process.Diffusion, n: int) -> None:
+        self.key = key
+        self.dp = dp
         self.n = n
 
     def __len__(self) -> int:
         return self.n
-    
+
     def __getitem__(self, index):
-        match index % 3:
+        if index < 0 or index >= len(self):
+            raise IndexError
+
+        self.key, subkey = jax.random.split(self.key)
+
+        match index % 2:
             case 0:
-                y0 = jnp.zeros(2)
+                y0 = -jnp.ones(2)
             case 1:
                 y0 = jnp.ones(2) * 2
             case 2:
                 y0 = jnp.array((2, -1))
 
-        return *diffusion.get_data(y0=y0), torch.tensor(np.asarray(y0))
+        return self.dp, *diffusion.get_data(dp=self.dp, y0=y0, key=subkey), y0
+
+
+def main():
+    key = jax.random.PRNGKey(0)
+    key, subkey1, subkey2, subkey3 = jax.random.split(key, 4)
+
+    dp = process.brownian_motion(jnp.eye(2))
+    model = Model(dp, learning_rate=1e-3)
+
+    t = trainer.Trainer(50)
+    t.fit(
+        subkey1,
+        model,
+        Dataset(subkey2, dp, 16),
+        Dataset(subkey3, dp, 4),
+    )
 
 
 if __name__ == '__main__':
-    model = Model()
-    train_data = Dataset(16)
-    val_data = Dataset(4)
-
-    trainer = lightning.Trainer(max_epochs=-1, log_every_n_steps=1)
-    trainer.fit(
-        model=model,
-        train_dataloaders=train_data,
-        val_dataloaders=val_data,
-    )
+    main()
