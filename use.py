@@ -1,47 +1,81 @@
+import sys
+import os.path
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from diffrax import (ControlTerm, Euler, MultiTerm, ODETerm, SaveAt,
-                     VirtualBrownianTree, diffeqsolve)
 
+import diffusion
 import process
 import score
 
 
-def f_bar(t, y, dp: process.Diffusion, use_analytical: bool = False):
+def _dp(dp: process.Diffusion, use_analytical: bool = False):
     if use_analytical:
-        s = -dp.inverse_diffusion(t, y) @ (y - jnp.ones(2) * 2) / t
+        def f_bar(t, y):
+            s = -dp.inverse_diffusion(t, y) @ (y - jnp.ones(2) * 2) / t
+            return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
     else:
-        s = state.apply_fn(state.params, t[None], y[None])[0]
+        def f_bar(t, y):
+            s = state.apply_fn(state.params, t[None], y[None])[0]
+            return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
 
-    return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
+    return process.Diffusion(
+        d=dp.d,
+        drift=f_bar,
+        diffusion=dp.diffusion,
+        inverse_diffusion=None,
+        diffusion_divergence=None,
+    )
 
 
-dp = process.brownian_motion(jnp.eye(2))
-state = score.Model.load_from_checkpoint('saved_models', dp=dp)
+dp = process.brownian_motion(jnp.array([[1, 0.6], [0.6, 1]]))
+# dp = process.brownian_motion(jnp.eye(2))
+state = score.Model.load_from_checkpoint(
+    os.path.join('logs', 'default', f'version_{sys.argv[1]}', 'checkpoints'),
+    dp=dp
+)
 
 learned = True
 
-key = jax.random.PRNGKey(0)
+key = jax.random.PRNGKey(1)
+
+plt.figure()
 for _ in range(5):
     key, subkey = jax.random.split(key)
-    dt = -0.001
 
-    brownian_motion = VirtualBrownianTree(0, 1, tol=1e-3, shape=(2,), key=subkey)
-    terms = MultiTerm(
-        ODETerm(lambda t, y, _: f_bar(t, y, dp, use_analytical=not learned)),
-        ControlTerm(lambda t, y, _: dp.diffusion(t, y), brownian_motion)
+    ts, ys, n = diffusion.get_data(
+        dp=_dp(dp, use_analytical=not learned),
+        y0=jnp.ones(dp.d) * 2,
+        key=subkey,
+        t0=1.,
+        t1=0.001,
+        dt=-0.001,
     )
-    solver = Euler()
-    saveat = SaveAt(steps=True)
-    sol = diffeqsolve(terms, solver, 1., 0.001, dt0=dt, y0=jnp.ones(2) * 2, saveat=saveat, max_steps=int(-1 / dt))
 
-    plt.plot(*sol.ys.T, linewidth=1, alpha=0.6)
-    plt.scatter(*sol.ys[-1], alpha=1)
-    print(sol.ys[-1])
-
+    plt.plot(*ys[:n].T, linewidth=1, alpha=0.6)
+    plt.scatter(*ys[n-1], alpha=1)
+    print(ys[n-1])
 plt.savefig(f'bbb_{"learned" if learned else "analytical"}.png', dpi=600)
+
+plt.figure()
+for _ in range(5):
+    key, subkey = jax.random.split(key)
+
+    ts, ys, n = diffusion.get_data(
+        dp=dp,
+        y0=jnp.ones(dp.d) * 2,
+        key=subkey,
+        t0=0,
+        t1=1,
+        dt=0.001,
+    )
+
+    plt.plot(*ys[:n].T, linewidth=1, alpha=0.6)
+    plt.scatter(*ys[n-1], alpha=1)
+    print(ys[n-1])
+plt.savefig('unconditioned.png', dpi=600)
 
 plt.figure()
 n = 20

@@ -58,6 +58,11 @@ class Model(trainer.Module):
     def configure_optimizers(self):
         return optax.adam(self.learning_rate)
 
+    def on_fit_end(self, params, state, log_path):
+        ...
+        # TODO: Use the code from `use.py` in here,
+        # and make sure to log in the right place
+
 
 class Dataset:
     def __init__(self, key, dp: process.Diffusion, n: int) -> None:
@@ -82,17 +87,21 @@ class Dataset:
             case 2:
                 y0 = jnp.array((2, -1))
 
-        return self.dp, *diffusion.get_data(dp=self.dp, y0=y0, key=subkey), y0
+        ts, ys, n = diffusion.get_data(dp=self.dp, y0=y0, key=subkey)
+
+        # return self.dp, ts, ys, y0
+        return self.dp, ts[:n], ys[:n], y0
 
 
 def main():
     key = jax.random.PRNGKey(0)
     key, subkey1, subkey2, subkey3 = jax.random.split(key, 4)
 
-    dp = process.brownian_motion(jnp.eye(2))
+    # dp = process.brownian_motion(jnp.eye(2))
+    dp = process.brownian_motion(jnp.array([[1, 0.6], [0.6, 1]]))
     model = Model(dp, learning_rate=1e-3)
 
-    t = trainer.Trainer(50)
+    t = trainer.Trainer(100)
     t.fit(
         subkey1,
         model,
