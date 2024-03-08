@@ -6,6 +6,7 @@ import pathlib
 import typing
 from typing import Generic, TypeVar
 
+import absl.logging
 import clu.metrics
 import jax
 import jax.numpy as jnp
@@ -14,6 +15,9 @@ import orbax.checkpoint
 import tqdm
 from flax import linen as nn
 from flax.training import orbax_utils, train_state
+
+# TODO: Remove once orbax has been updated
+absl.logging.set_verbosity(absl.logging.ERROR)
 
 State = TypeVar('State', bound=train_state.TrainState)
 
@@ -146,7 +150,13 @@ class Checkpointer:
         )
 
     def save(self, epoch, state, **kwargs) -> None:
-        self.checkpoint_manager.save(epoch, state, save_kwargs=self.save_args, **kwargs)
+        try:
+            self.checkpoint_manager.save(epoch, state, save_kwargs=self.save_args, **kwargs)
+        except ValueError as e:
+            if 'already exists' in str(e):
+                pass
+            else:
+                raise e
 
 
 class Trainer:

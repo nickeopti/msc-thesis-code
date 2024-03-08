@@ -1,3 +1,5 @@
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -27,7 +29,7 @@ def visualise_sample_paths(dp: process.Diffusion, key, filename, n: int = 5, **k
     plt.savefig(filename, dpi=600)
 
 
-def visualise_vector_field(state: train_state.TrainState, filename, n: int = 20, a: float = -2, b: float = 4):
+def visualise_vector_field(score: Callable[[jax.Array, jax.Array], jax.Array], filename, n: int = 20, a: float = -3, b: float = 3):
     plt.figure()
 
     xs = np.linspace(a, b, n)
@@ -35,9 +37,9 @@ def visualise_vector_field(state: train_state.TrainState, filename, n: int = 20,
     xx, yy = np.meshgrid(xs, ys)
 
     s = np.stack((xx.flatten(), yy.flatten())).T
-    u, v = state.apply_fn(state.params, jnp.ones(n**2), s).T.reshape(2, n, n)
+    u, v = score(jnp.ones(n**2) / 2., s).T.reshape(2, n, n)
 
-    plt.contourf(xx, yy, np.sqrt(u**2 + v**2), levels=50)
+    plt.contourf(xx, yy, np.sqrt(u**2 + v**2), levels=jnp.linspace(0, 4, 50))
     plt.colorbar()
     plt.quiver(xs, ys, u, v)
 

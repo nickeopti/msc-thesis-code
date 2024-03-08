@@ -1,4 +1,5 @@
 import pathlib
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -23,11 +24,11 @@ class Model(trainer.Module[State]):
         z = nn.Sequential(
             [
                 nn.Dense(16),
-                nn.gelu,
+                nn.tanh,
                 nn.Dense(32),
-                nn.gelu,
+                nn.tanh,
                 nn.Dense(16),
-                nn.gelu,
+                nn.tanh,
                 nn.Dense(self.dp.d)
             ]
         )(y)
@@ -108,9 +109,20 @@ class Model(trainer.Module[State]):
             dt=0.001,
         )
 
+        y0_1 = -jnp.ones(2)
+        y0_2 = jnp.ones(2)
+
+        a = lambda t, y, y0: jnp.exp(-(y - y0).T @ self.dp.inverse_diffusion(t, y) @ (y - y0))
+        s = lambda t, y: -1 / (a(t, y, y0_1) + a(t, y, y0_2)) * (self.dp.inverse_diffusion(t, y) @ (y - y0_1) * a(t, y, y0_1) + self.dp.inverse_diffusion(t, y) @ (y - y0_2) * a(t, y, y0_2))
+
         visualise.visualise_vector_field(
-            state=state,
-            filename=plots_path / 'score_vector_field.png',
+            score=jax.vmap(s),
+            filename=plots_path / 'analytical_score_vector_field.png',
+        )
+
+        visualise.visualise_vector_field(
+            score=partial(state.apply_fn, state.params),
+            filename=plots_path / 'learned_score_vector_field.png',
         )
 
 
@@ -133,13 +145,12 @@ class Dataset:
             case 0:
                 y0 = -jnp.ones(2)
             case 1:
-                y0 = jnp.ones(2) * 2
+                y0 = jnp.ones(2)
             case 2:
                 y0 = jnp.array((2, -1))
 
         ts, ys, n = diffusion.get_data(dp=self.dp, y0=y0, key=subkey)
 
-        # return self.dp, ts, ys, y0
         return self.dp, ts[:n], ys[:n], y0
 
 
@@ -147,11 +158,11 @@ def main():
     key = jax.random.PRNGKey(0)
     key, subkey1, subkey2, subkey3 = jax.random.split(key, 4)
 
-    # dp = process.brownian_motion(jnp.eye(2))
-    dp = process.brownian_motion(jnp.array([[1, 0.6], [0.6, 1]]))
+    dp = process.brownian_motion(2 * jnp.eye(2))
+    # dp = process.brownian_motion(jnp.array([[1, 0.6], [0.6, 1]]))
     model = Model(dp, learning_rate=1e-3)
 
-    t = trainer.Trainer(100)
+    t = trainer.Trainer(500)
     t.fit(
         subkey1,
         model,
