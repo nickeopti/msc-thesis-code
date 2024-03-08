@@ -3,39 +3,50 @@ import csv
 import datetime
 import itertools
 import pathlib
+import typing
+from typing import Generic, TypeVar
 
 import clu.metrics
 import jax
 import jax.numpy as jnp
+import optax
 import orbax.checkpoint
 import tqdm
 from flax import linen as nn
 from flax.training import orbax_utils, train_state
 
+State = TypeVar('State', bound=train_state.TrainState)
 
-class Module(nn.Module, abc.ABC):
+
+def _get_class_from_type(cls: Generic[State]) -> State:
+    # Pure Python magic; get the concrete class of a generic type
+    state_class: State = typing.get_args(cls.__orig_bases__[0])[0]
+    return state_class
+
+
+class Module(nn.Module, abc.ABC, Generic[State]):
     @abc.abstractmethod
     def initialise_params(self, rng):
         ...
 
     @staticmethod
     @abc.abstractmethod
-    def training_step(params, state, *args):
+    def training_step(state: State, *args) -> jax.Array:
         ...
 
     @staticmethod
-    def validation_step(params, state, *args):
+    def validation_step(state: State, *args) -> jax.Array:
         ...
 
-    def on_fit_end(self, params, state, log_path):
+    def on_fit_end(self, state: State, log_path: pathlib.Path) -> None:
         ...
 
     @abc.abstractmethod
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> optax.GradientTransformation:
         ...
 
     @classmethod
-    def load_from_checkpoint(cls, path, /, **kwargs) -> train_state.TrainState:
+    def load_from_checkpoint(cls, path, /, **kwargs) -> State:
         # Don't really care about values nor randomness here,
         # as the values will anyways be overriden from the checkpoint
         key = jax.random.PRNGKey(0)
@@ -50,13 +61,14 @@ class Module(nn.Module, abc.ABC):
             orbax_checkpointer,
         )
 
-        empty_state = train_state.TrainState.create(
+        state_class: State = _get_class_from_type(cls)
+        empty_state = state_class.create(
             apply_fn=model.apply,
             params=jax.tree_map(jnp.zeros_like, params),
             tx=tx,
         )
 
-        state: train_state.TrainState = checkpoint_manager.restore(
+        state: State = checkpoint_manager.restore(
             checkpoint_manager.latest_step(),
             items=empty_state,
         )
@@ -151,13 +163,14 @@ class Trainer:
     def fit(
         self,
         rng,
-        model: Module,
+        model: Module[State],
         train_data,
         val_data=None,
-        state: train_state.TrainState = None,
+        state: State = None,
     ):
         if state is None:
-            state = train_state.TrainState.create(
+            state_class: State = _get_class_from_type(model.__class__)
+            state = state_class.create(
                 apply_fn=model.apply,
                 params=model.initialise_params(rng),
                 tx=model.configure_optimizers(),
@@ -175,7 +188,8 @@ class Trainer:
 
                 for batch in tqdm.tqdm(train_data, desc='Training', leave=False):
                     def loss_fn(params):
-                        return model.training_step(params, state, *batch)
+                        local_state = state.replace(params=params)
+                        return model.training_step(local_state, *batch)
 
                     grad_fn = jax.value_and_grad(loss_fn)
                     loss, grad = grad_fn(state.params)
@@ -187,7 +201,7 @@ class Trainer:
 
                 if val_data is not None:
                     for batch in tqdm.tqdm(val_data, desc='Validating', leave=False):
-                        loss = model.validation_step(state.params, state, *batch)
+                        loss = model.validation_step(state, *batch)
 
                         val_loss = val_loss.merge(
                             val_loss.from_model_output(loss)
@@ -206,6 +220,6 @@ class Trainer:
 
         print(datetime.datetime.now())
 
-        model.on_fit_end(state.params, state, self.logger.path)
+        model.on_fit_end(state, self.logger.path)
 
         return state

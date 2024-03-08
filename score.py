@@ -11,8 +11,10 @@ import process
 import trainer
 import visualise
 
+State = train_state.TrainState
 
-class Model(trainer.Module):
+
+class Model(trainer.Module[State]):
     dp: process.Diffusion
     learning_rate: float = 1e-3
 
@@ -34,8 +36,8 @@ class Model(trainer.Module):
 
     @staticmethod
     @jax.jit
-    def training_step(params, state: train_state.TrainState, dp: process.Diffusion, ts, ys, v):
-        ps = state.apply_fn(params, ts[1:], ys[1:])
+    def training_step(state: State, dp: process.Diffusion, ts, ys, v):
+        ps = state.apply_fn(state.params, ts[1:], ys[1:])
 
         def loss(p, t, y, y_next, dt):
             return jnp.linalg.norm(p + dp.inverse_diffusion(t, y) @ (y_next - y - dp.drift(t, y) * dt) / dt)**2
@@ -45,8 +47,8 @@ class Model(trainer.Module):
 
     @staticmethod
     @jax.jit
-    def validation_step(params, state: train_state.TrainState, dp: process.Diffusion, ts, ys, v):
-        ps = state.apply_fn(params, ts[1:], ys[1:])
+    def validation_step(state: State, dp: process.Diffusion, ts, ys, v):
+        ps = state.apply_fn(state.params, ts[1:], ys[1:])
 
         def loss(p, t, y):
             psi = -dp.inverse_diffusion(t, y) @ (y - v) / t
@@ -61,7 +63,7 @@ class Model(trainer.Module):
     def configure_optimizers(self):
         return optax.adam(self.learning_rate)
 
-    def on_fit_end(self, params, state: train_state.TrainState, log_path: pathlib.Path):
+    def on_fit_end(self, state: State, log_path: pathlib.Path):
         plots_path = log_path / 'plots'
         plots_path.mkdir(parents=True, exist_ok=True)
 
@@ -76,7 +78,7 @@ class Model(trainer.Module):
         def f_bar_learned(t, y):
             s = state.apply_fn(state.params, t[None], y[None])[0]
             return self.dp.drift(t, y) - self.dp.diffusion(t, y) @ s - self.dp.diffusion_divergence(t, y)
-        
+
         for f_bar, name in ((f_bar_analytical, 'analytical'), (f_bar_learned, 'learned')):
             dp_bar = process.Diffusion(
                 d=self.dp.d,
@@ -95,7 +97,7 @@ class Model(trainer.Module):
                 t1=0.001,
                 dt=-0.001,
             )
-        
+
         visualise.visualise_sample_paths(
             dp=self.dp,
             key=key,
