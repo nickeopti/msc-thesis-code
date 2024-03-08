@@ -1,3 +1,5 @@
+import pathlib
+
 import jax
 import jax.numpy as jnp
 import optax
@@ -7,6 +9,7 @@ from flax.training import train_state
 import diffusion
 import process
 import trainer
+import visualise
 
 
 class Model(trainer.Module):
@@ -58,10 +61,55 @@ class Model(trainer.Module):
     def configure_optimizers(self):
         return optax.adam(self.learning_rate)
 
-    def on_fit_end(self, params, state, log_path):
-        ...
-        # TODO: Use the code from `use.py` in here,
-        # and make sure to log in the right place
+    def on_fit_end(self, params, state: train_state.TrainState, log_path: pathlib.Path):
+        plots_path = log_path / 'plots'
+        plots_path.mkdir(parents=True, exist_ok=True)
+
+        # Deliberately reuse random key
+        key = jax.random.PRNGKey(1)
+        y0 = jnp.ones(self.dp.d) * 2
+
+        def f_bar_analytical(t, y):
+            s = -self.dp.inverse_diffusion(t, y) @ (y - y0) / t
+            return self.dp.drift(t, y) - self.dp.diffusion(t, y) @ s - self.dp.diffusion_divergence(t, y)
+
+        def f_bar_learned(t, y):
+            s = state.apply_fn(state.params, t[None], y[None])[0]
+            return self.dp.drift(t, y) - self.dp.diffusion(t, y) @ s - self.dp.diffusion_divergence(t, y)
+        
+        for f_bar, name in ((f_bar_analytical, 'analytical'), (f_bar_learned, 'learned')):
+            dp_bar = process.Diffusion(
+                d=self.dp.d,
+                drift=f_bar,
+                diffusion=self.dp.diffusion,
+                inverse_diffusion=None,
+                diffusion_divergence=None,
+            )
+
+            visualise.visualise_sample_paths(
+                dp=dp_bar,
+                key=key,
+                filename=plots_path / f'{name}_bridge.png',
+                y0=y0,
+                t0=1.,
+                t1=0.001,
+                dt=-0.001,
+            )
+        
+        visualise.visualise_sample_paths(
+            dp=self.dp,
+            key=key,
+            filename=plots_path / 'unconditional.png',
+            y0=y0,
+            t0=0,
+            t1=1,
+            dt=0.001,
+        )
+
+        visualise.visualise_vector_field(
+            state=state,
+            filename=plots_path / 'score_vector_field.png',
+        )
 
 
 class Dataset:

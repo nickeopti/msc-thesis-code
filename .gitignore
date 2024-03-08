@@ -1,3 +1,5 @@
 /venv/
 /lightning_logs/
 /plots/
+__pycache__
+/logs/
