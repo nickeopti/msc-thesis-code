@@ -14,7 +14,8 @@ if (length(args) == 1) {
 }
 
 metrics_path <- paste(
-    "lightning_logs",
+    "logs",
+    "default",
     paste("version_", v_num, sep = ""),
     "metrics.csv",
     sep = "/"
@@ -23,9 +24,9 @@ metrics_path <- paste(
 metrics <- read_csv(metrics_path)
 
 metrics %>%
-    pivot_longer(!c(epoch, step), names_to = "loss", values_to = "value") %>%
-    group_by(epoch, loss) %>%
-    summarise(value = mean(value, na.rm = TRUE)) %>%
+    pivot_longer(!epoch, names_to = "loss", values_to = "value") %>%
+    # group_by(epoch, loss) %>%
+    # summarise(value = mean(value, na.rm = TRUE)) %>%
     filter(epoch >= cutoff) %>%
     ggplot() +
         aes(x = epoch, y = value) +
