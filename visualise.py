@@ -29,6 +29,25 @@ def visualise_sample_paths(dp: process.Diffusion, key, filename, n: int = 5, **k
     plt.savefig(filename, dpi=600)
 
 
+def visualise_sample_paths_f(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+    plt.figure()
+
+    for _ in range(n):
+        key, subkey = jax.random.split(key)
+
+        _, ys, n = diffusion.get_paths(
+            dp=dp,
+            key=subkey,
+            **kwargs
+        )
+
+        plt.plot(*ys[:n].T, linewidth=1, alpha=0.6)
+        plt.scatter(*ys[n-1], alpha=1)
+        print(ys[n-1])
+
+    plt.savefig(filename, dpi=600)
+
+
 def visualise_vector_field(score: Callable[[jax.Array, jax.Array], jax.Array], filename, n: int = 20, a: float = -3, b: float = 3):
     plt.figure()
 

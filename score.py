@@ -20,7 +20,8 @@ class Model(trainer.Module[State]):
     learning_rate: float = 1e-3
 
     @nn.compact
-    def __call__(self, t, y):
+    def __call__(self, t, y, c):
+        cv = jnp.ones_like(t) * c
         z = nn.Sequential(
             [
                 nn.Dense(16),
@@ -31,40 +32,40 @@ class Model(trainer.Module[State]):
                 nn.tanh,
                 nn.Dense(self.dp.d)
             ]
-        )(y)
+        )(jnp.hstack((cv[:, None], y)))
 
         return z / t[:, None]
 
     @staticmethod
     @jax.jit
-    def training_step(state: State, dp: process.Diffusion, ts, ys, v):
-        ps = state.apply_fn(state.params, ts[1:], ys[1:])
+    def training_step(state: State, dp: process.Diffusion, ts, ys, v, c):
+        ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
 
         def loss(p, t, y, y_next, dt):
-            return jnp.linalg.norm(p + dp.inverse_diffusion(t, y) @ (y_next - y - dp.drift(t, y) * dt) / dt)**2
+            return jnp.linalg.norm(p + dp.inverse_diffusion @ (y_next - y - dp.drift * dt) / dt)**2
 
         l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
         return jnp.mean(l)
 
     @staticmethod
     @jax.jit
-    def validation_step(state: State, dp: process.Diffusion, ts, ys, v):
-        ps = state.apply_fn(state.params, ts[1:], ys[1:])
+    def validation_step(state: State, dp: process.Diffusion, ts, ys, v, c):
+        ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
 
         def loss(p, t, y):
-            psi = -dp.inverse_diffusion(t, y) @ (y - v) / t
+            psi = -dp.inverse_diffusion @ (y - v) / t
             return jnp.linalg.norm(p - psi)**2
 
         l = jax.vmap(loss)(ps, ts[1:], ys[1:])
         return jnp.mean(l)
 
     def initialise_params(self, rng):
-        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d)))
+        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d)), 0)
 
     def configure_optimizers(self):
         return optax.adam(self.learning_rate)
 
-    def on_fit_end(self, state: State, log_path: pathlib.Path):
+    def on_fit_end(self, state: State, log_path: pathlib.Path, c):
         plots_path = log_path / 'plots'
         plots_path.mkdir(parents=True, exist_ok=True)
 
@@ -73,12 +74,12 @@ class Model(trainer.Module[State]):
         y0 = jnp.ones(self.dp.d) * 2
 
         def f_bar_analytical(t, y):
-            s = -self.dp.inverse_diffusion(t, y) @ (y - y0) / t
-            return self.dp.drift(t, y) - self.dp.diffusion(t, y) @ s - self.dp.diffusion_divergence(t, y)
+            s = -self.dp.inverse_diffusion @ (y - y0) / t
+            return self.dp.drift - self.dp.diffusion @ s - self.dp.diffusion_divergence
 
         def f_bar_learned(t, y):
-            s = state.apply_fn(state.params, t[None], y[None])[0]
-            return self.dp.drift(t, y) - self.dp.diffusion(t, y) @ s - self.dp.diffusion_divergence(t, y)
+            s = state.apply_fn(state.params, t[None], y[None], c)[0]
+            return self.dp.drift - self.dp.diffusion @ s - self.dp.diffusion_divergence
 
         for f_bar, name in ((f_bar_analytical, 'analytical'), (f_bar_learned, 'learned')):
             dp_bar = process.Diffusion(
@@ -89,7 +90,7 @@ class Model(trainer.Module[State]):
                 diffusion_divergence=None,
             )
 
-            visualise.visualise_sample_paths(
+            visualise.visualise_sample_paths_f(
                 dp=dp_bar,
                 key=key,
                 filename=plots_path / f'{name}_bridge.png',
@@ -112,8 +113,8 @@ class Model(trainer.Module[State]):
         y0_1 = -jnp.ones(2)
         y0_2 = jnp.ones(2)
 
-        a = lambda t, y, y0: jnp.exp(-(y - y0).T @ self.dp.inverse_diffusion(t, y) @ (y - y0))
-        s = lambda t, y: -1 / (a(t, y, y0_1) + a(t, y, y0_2)) * (self.dp.inverse_diffusion(t, y) @ (y - y0_1) * a(t, y, y0_1) + self.dp.inverse_diffusion(t, y) @ (y - y0_2) * a(t, y, y0_2))
+        a = lambda t, y, y0: jnp.exp(-(y - y0).T @ self.dp.inverse_diffusion @ (y - y0))
+        s = lambda t, y: -1 / (a(t, y, y0_1) + a(t, y, y0_2)) * (self.dp.inverse_diffusion @ (y - y0_1) * a(t, y, y0_1) + self.dp.inverse_diffusion @ (y - y0_2) * a(t, y, y0_2))
 
         visualise.visualise_vector_field(
             score=jax.vmap(s),
@@ -121,7 +122,7 @@ class Model(trainer.Module[State]):
         )
 
         visualise.visualise_vector_field(
-            score=partial(state.apply_fn, state.params),
+            score=partial(state.apply_fn, state.params, c=c),
             filename=plots_path / 'learned_score_vector_field.png',
         )
 
@@ -129,7 +130,6 @@ class Model(trainer.Module[State]):
 class Dataset:
     def __init__(self, key, dp: process.Diffusion, n: int) -> None:
         self.key = key
-        self.dp = dp
         self.n = n
 
     def __len__(self) -> int:
@@ -139,7 +139,16 @@ class Dataset:
         if index < 0 or index >= len(self):
             raise IndexError
 
-        self.key, subkey = jax.random.split(self.key)
+        self.key, subkey1, subkey2 = jax.random.split(self.key, 3)
+
+        covariance = jax.random.uniform(subkey1, minval=-1, maxval=1)
+        covariance_matrix = jnp.array(
+            [
+                [1, covariance],
+                [covariance, 1]
+            ]
+        )
+        dp = process.brownian_motion(covariance_matrix)
 
         match index % 2:
             case 0:
@@ -149,20 +158,19 @@ class Dataset:
             case 2:
                 y0 = jnp.array((2, -1))
 
-        ts, ys, n = diffusion.get_data(dp=self.dp, y0=y0, key=subkey)
+        ts, ys, n = diffusion.get_data(dp=dp, y0=y0, key=subkey2)
 
-        return self.dp, ts[:n], ys[:n], y0
+        return dp, ts[:n], ys[:n], y0, covariance
 
 
 def main():
     key = jax.random.PRNGKey(0)
     key, subkey1, subkey2, subkey3 = jax.random.split(key, 4)
 
-    dp = process.brownian_motion(2 * jnp.eye(2))
-    # dp = process.brownian_motion(jnp.array([[1, 0.6], [0.6, 1]]))
+    dp = process.brownian_motion(jnp.eye(2))
     model = Model(dp, learning_rate=1e-3)
 
-    t = trainer.Trainer(500)
+    t = trainer.Trainer(1000)
     t.fit(
         subkey1,
         model,
