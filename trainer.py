@@ -4,7 +4,7 @@ import datetime
 import itertools
 import pathlib
 import typing
-from typing import Generic, TypeVar
+from typing import Generic, Self, TypeVar
 
 import absl.logging
 import clu.metrics
@@ -50,7 +50,7 @@ class Module(nn.Module, abc.ABC, Generic[State]):
         ...
 
     @classmethod
-    def load_from_checkpoint(cls, path, /, **kwargs) -> State:
+    def load_from_checkpoint(cls, path, /, **kwargs) -> tuple[Self, State]:
         # Don't really care about values nor randomness here,
         # as the values will anyways be overriden from the checkpoint
         key = jax.random.PRNGKey(0)
@@ -77,7 +77,7 @@ class Module(nn.Module, abc.ABC, Generic[State]):
             items=empty_state,
         )
 
-        return state
+        return model, state
 
 
 class Logger:
