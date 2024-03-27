@@ -48,7 +48,7 @@ def visualise_sample_paths_f(dp: process.Diffusion, key, filename, n: int = 5, *
     plt.savefig(filename, dpi=600)
 
 
-def visualise_vector_field(score: Callable[[jax.Array, jax.Array], jax.Array], filename, n: int = 20, a: float = -3, b: float = 3):
+def visualise_vector_field(score: Callable[[jax.Array, jax.Array], jax.Array], filename, n: int = 20, a: float = -3, b: float = 3, val: float = 5, nv: int = 51):
     plt.figure()
 
     xs = np.linspace(a, b, n)
@@ -56,9 +56,9 @@ def visualise_vector_field(score: Callable[[jax.Array, jax.Array], jax.Array], f
     xx, yy = np.meshgrid(xs, ys)
 
     s = np.stack((xx.flatten(), yy.flatten())).T
-    u, v = score(jnp.ones(n**2) / 2., s).T.reshape(2, n, n)
+    u, v = score(jnp.ones(n**2) / 1., s).T.reshape(2, n, n)
 
-    plt.contourf(xx, yy, np.sqrt(u**2 + v**2), levels=jnp.linspace(0, 4, 50))
+    plt.contourf(xx, yy, np.sqrt(u**2 + v**2), levels=jnp.linspace(0, val, nv))
     plt.colorbar()
     plt.quiver(xs, ys, u, v)
 
