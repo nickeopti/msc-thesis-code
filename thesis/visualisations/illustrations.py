@@ -4,10 +4,9 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from flax.training import train_state
 
-import diffusion
-import process
+import thesis.processes.diffusion as diffusion
+import thesis.processes.process as process
 
 
 def visualise_sample_paths(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):

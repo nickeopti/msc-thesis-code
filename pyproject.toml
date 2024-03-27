@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thesis"
+version = "0.0.1"
+requires-python = ">=3.10"
+dependencies = [
+    "clu",
+    "diffrax",
+    "flax",
+    "jax",
+    "jaxlib",
+    "matplotlib",
+    "numpy",
+    "optax",
+    "orbax-checkpoint",
+    "selector@git+https://github.com/nickeopti/selector",
+    "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+namespaces = false
+
+[project.scripts]

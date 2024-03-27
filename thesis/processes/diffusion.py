@@ -7,7 +7,7 @@ import jax
 from diffrax import (ControlTerm, Euler, MultiTerm, ODETerm, SaveAt,
                      VirtualBrownianTree, diffeqsolve)
 
-import process
+import thesis.processes.process as process
 
 
 class ReverseVirtualBrownianTree(VirtualBrownianTree):

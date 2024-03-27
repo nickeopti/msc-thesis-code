@@ -7,15 +7,14 @@ import optax
 from flax import linen as nn
 from flax.training import train_state
 
-import diffusion
-import process
-import trainer
-import visualise
+import thesis.lightning
+import thesis.processes.process as process
+import thesis.visualisations.illustrations as illustrations
 
 State = train_state.TrainState
 
 
-class Model(trainer.Module[State]):
+class Model(thesis.lightning.Module[State]):
     dp: process.Diffusion
     learning_rate: float = 1e-3
 
@@ -96,7 +95,7 @@ class Model(trainer.Module[State]):
                 diffusion_divergence=None,
             )
 
-            visualise.visualise_sample_paths_f(
+            illustrations.visualise_sample_paths_f(
                 dp=dp_bar,
                 key=key,
                 filename=plots_path / f'{name}_bridge.png',
@@ -106,7 +105,7 @@ class Model(trainer.Module[State]):
                 dt=-0.001,
             )
 
-        visualise.visualise_sample_paths(
+        illustrations.visualise_sample_paths(
             dp=self.dp,
             key=key,
             filename=plots_path / 'unconditional.png',
@@ -122,68 +121,12 @@ class Model(trainer.Module[State]):
         a = lambda t, y, y0: jnp.exp(-(y - y0).T @ self.dp.inverse_diffusion @ (y - y0) / t)
         s = lambda t, y: -1 / (a(t, y, y0_1) + a(t, y, y0_2)) * (self.dp.inverse_diffusion @ (y - y0_1) * a(t, y, y0_1) / t + self.dp.inverse_diffusion @ (y - y0_2) * a(t, y, y0_2) / t)
 
-        visualise.visualise_vector_field(
+        illustrations.visualise_vector_field(
             score=jax.vmap(s),
             filename=plots_path / 'analytical_score_vector_field.png',
         )
 
-        visualise.visualise_vector_field(
+        illustrations.visualise_vector_field(
             score=partial(state.apply_fn, state.params, c=c),
             filename=plots_path / 'learned_score_vector_field.png',
         )
-
-
-class Dataset:
-    def __init__(self, key, dp: process.Diffusion, n: int) -> None:
-        self.key = key
-        self.n = n
-
-    def __len__(self) -> int:
-        return self.n
-
-    def __getitem__(self, index):
-        if index < 0 or index >= len(self):
-            raise IndexError
-
-        self.key, subkey1, subkey2 = jax.random.split(self.key, 3)
-
-        covariance = jax.random.uniform(subkey1, minval=-1, maxval=1)
-        covariance_matrix = jnp.array(
-            [
-                [1, covariance],
-                [covariance, 1]
-            ]
-        )
-        dp = process.brownian_motion(covariance_matrix)
-
-        match index % 2:
-            case 0:
-                y0 = -jnp.ones(2)
-            case 1:
-                y0 = jnp.ones(2)
-            case 2:
-                y0 = jnp.array((2, -1))
-
-        ts, ys, n = diffusion.get_data(dp=dp, y0=y0, key=subkey2)
-
-        return dp, ts[:n], ys[:n], y0, covariance
-
-
-def main():
-    key = jax.random.PRNGKey(0)
-    key, subkey1, subkey2, subkey3 = jax.random.split(key, 4)
-
-    dp = process.brownian_motion(jnp.eye(2))
-    model = Model(dp, learning_rate=1e-3)
-
-    t = trainer.Trainer(500)
-    t.fit(
-        subkey1,
-        model,
-        Dataset(subkey2, dp, 16),
-        Dataset(subkey3, dp, 4),
-    )
-
-
-if __name__ == '__main__':
-    main()

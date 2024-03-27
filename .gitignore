@@ -2,4 +2,7 @@
 /lightning_logs/
 /plots/
 __pycache__
+.mypy_cache
 /logs/
+/perspectives/
+*.egg-info

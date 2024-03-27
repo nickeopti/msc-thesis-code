@@ -25,8 +25,6 @@ metrics <- read_csv(metrics_path)
 
 metrics %>%
     pivot_longer(!epoch, names_to = "loss", values_to = "value") %>%
-    # group_by(epoch, loss) %>%
-    # summarise(value = mean(value, na.rm = TRUE)) %>%
     filter(epoch >= cutoff) %>%
     ggplot() +
         aes(x = epoch, y = value) +

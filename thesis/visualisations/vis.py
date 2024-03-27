@@ -1,11 +1,10 @@
-import sys
 import pathlib
+import sys
 
 import jax.numpy as jnp
 
-import score
-import process
-
+import thesis.models.baseline
+import thesis.processes.process as process
 
 covariance = -0.3
 covariance_matrix = jnp.array(
@@ -16,7 +15,7 @@ covariance_matrix = jnp.array(
 )
 dp = process.brownian_motion(covariance_matrix)
 
-model, state = score.Model.load_from_checkpoint(
+model, state = thesis.models.baseline.Model.load_from_checkpoint(
     sys.argv[1],
     dp=dp,
 )

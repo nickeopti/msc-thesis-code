@@ -3,8 +3,8 @@ import jax.numpy as jnp
 import jax.random
 import matplotlib.pyplot as plt
 
-import diffusion
-import process
+import thesis.processes.diffusion as diffusion
+import thesis.processes.process as process
 
 key = jax.random.PRNGKey(1)
 
