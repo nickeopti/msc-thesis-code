@@ -41,8 +41,14 @@ class Model(trainer.Module[State]):
     def training_step(state: State, dp: process.Diffusion, ts, ys, v, c):
         ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
 
+        # y0_1 = -jnp.ones(2)
+        # y0_2 = jnp.ones(2)
+
         def loss(p, t, y, y_next, dt):
             return jnp.linalg.norm(p + dp.inverse_diffusion @ (y_next - y - dp.drift * dt) / dt)**2
+            # a = lambda t, y, y0: jnp.exp(-(y - y0).T @ dp.inverse_diffusion @ (y - y0))
+            # s = lambda t, y: -1 / (a(t, y, y0_1) + a(t, y, y0_2)) * (dp.inverse_diffusion @ (y - y0_1) * a(t, y, y0_1) + dp.inverse_diffusion @ (y - y0_2) * a(t, y, y0_2))
+            # return jnp.linalg.norm(p - s(t, y))**2
 
         l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
         return jnp.mean(l)
@@ -65,7 +71,7 @@ class Model(trainer.Module[State]):
     def configure_optimizers(self):
         return optax.adam(self.learning_rate)
 
-    def on_fit_end(self, state: State, log_path: pathlib.Path, c):
+    def on_fit_end(self, state: State, log_path: pathlib.Path, c: float = 0):
         plots_path = log_path / 'plots'
         plots_path.mkdir(parents=True, exist_ok=True)
 
@@ -113,8 +119,8 @@ class Model(trainer.Module[State]):
         y0_1 = -jnp.ones(2)
         y0_2 = jnp.ones(2)
 
-        a = lambda t, y, y0: jnp.exp(-(y - y0).T @ self.dp.inverse_diffusion @ (y - y0))
-        s = lambda t, y: -1 / (a(t, y, y0_1) + a(t, y, y0_2)) * (self.dp.inverse_diffusion @ (y - y0_1) * a(t, y, y0_1) + self.dp.inverse_diffusion @ (y - y0_2) * a(t, y, y0_2))
+        a = lambda t, y, y0: jnp.exp(-(y - y0).T @ self.dp.inverse_diffusion @ (y - y0) / t)
+        s = lambda t, y: -1 / (a(t, y, y0_1) + a(t, y, y0_2)) * (self.dp.inverse_diffusion @ (y - y0_1) * a(t, y, y0_1) / t + self.dp.inverse_diffusion @ (y - y0_2) * a(t, y, y0_2) / t)
 
         visualise.visualise_vector_field(
             score=jax.vmap(s),
@@ -170,7 +176,7 @@ def main():
     dp = process.brownian_motion(jnp.eye(2))
     model = Model(dp, learning_rate=1e-3)
 
-    t = trainer.Trainer(1000)
+    t = trainer.Trainer(500)
     t.fit(
         subkey1,
         model,
