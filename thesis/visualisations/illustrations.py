@@ -28,6 +28,25 @@ def visualise_sample_paths(dp: process.Diffusion, key, filename, n: int = 5, **k
     plt.savefig(filename, dpi=600)
 
 
+def visualise_sample_paths_1d(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+    plt.figure()
+
+    for _ in range(n):
+        key, subkey = jax.random.split(key)
+
+        ts, ys, n = diffusion.get_data(
+            dp=dp,
+            key=subkey,
+            **kwargs
+        )
+
+        plt.plot(ts[:n], ys[:n, 0], linewidth=1, alpha=0.6)
+        plt.scatter(ts[n-1], ys[n-1], alpha=1)
+        print(ys[n-1])
+
+    plt.savefig(filename, dpi=600)
+
+
 def visualise_sample_paths_f(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
     plt.figure()
 
@@ -42,6 +61,25 @@ def visualise_sample_paths_f(dp: process.Diffusion, key, filename, n: int = 5, *
 
         plt.plot(*ys[:n].T, linewidth=1, alpha=0.6)
         plt.scatter(*ys[n-1], alpha=1)
+        print(ys[n-1])
+
+    plt.savefig(filename, dpi=600)
+
+
+def visualise_sample_paths_f_1d(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+    plt.figure()
+
+    for _ in range(n):
+        key, subkey = jax.random.split(key)
+
+        ts, ys, n = diffusion.get_paths(
+            dp=dp,
+            key=subkey,
+            **kwargs
+        )
+
+        plt.plot(ts[:n], ys[:n, 0], linewidth=1, alpha=0.6)
+        plt.scatter(ts[n-1], ys[n-1], alpha=1)
         print(ys[n-1])
 
     plt.savefig(filename, dpi=600)
