@@ -27,7 +27,7 @@ class Trainer:
         train_data,
         val_data=None,
         state: State = None,
-    ):
+    ) -> State:
         if state is None:
             state_class: State = thesis.lightning._get_class_from_type(model.__class__)
             state = state_class.create(
