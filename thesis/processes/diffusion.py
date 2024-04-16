@@ -54,7 +54,8 @@ def get_paths(
     t0: float = 0,
     t1: float = 1,
     dt: float = 0.01,
-    brownian_tree_class: Type[VirtualBrownianTree] = VirtualBrownianTree
+    max_steps: int = 2000,
+    brownian_tree_class: Type[VirtualBrownianTree] = VirtualBrownianTree,
 ):
     d = dp.diffusion.shape[0]
     brownian_motion = brownian_tree_class(min(t0, t1), max(t0, t1), tol=1e-3, shape=(d,), key=key)
@@ -65,7 +66,8 @@ def get_paths(
 
     solver = Euler()
     saveat = SaveAt(steps=True)
-    sol = diffeqsolve(terms, solver, t0, t1, dt0=dt, y0=y0, saveat=saveat, max_steps=math.floor(abs((t1 - t0) / dt)) + 1)
+    # sol = diffeqsolve(terms, solver, t0, t1, dt0=dt, y0=y0, saveat=saveat, max_steps=math.floor(abs((t1 - t0) / dt)) + 1)
+    sol = diffeqsolve(terms, solver, t0, t1, dt0=dt, y0=y0, saveat=saveat, max_steps=max_steps)
 
     n = sol.stats['num_steps']
 
