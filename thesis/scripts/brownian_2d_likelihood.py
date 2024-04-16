@@ -83,15 +83,22 @@ def main():
     plots_path.mkdir(parents=True, exist_ok=True)
 
     # Deliberately reuse random key
-    key = jax.random.PRNGKey(1)
+    key = jax.random.PRNGKey(2024)
     y0 = jnp.zeros(dp.d)
     yT = jnp.ones(dp.d) * 0.5
 
-    results = []
+    approximated_likelihoods = []
+    analytical_likelihoods = []
 
-    # for covariance in (-0.5, -0.3, 0, 0.3, 0.5):
+    with open('lls.csv', 'w') as f:
+        f.write('variance,point,path,time,loglikelihood\n')
+
+    # for covariance in (-0.8, -0.5, -0.3, 0, 0.3, 0.5, 0.8):
     # for covariance in (0.001, 0.01, 0.1, 1, 2, 5, 10):
-    for covariance in jnp.linspace(0.1, 1.9, 10):
+    # for covariance in jnp.linspace(0.1, 1.9, 10):
+    # for covariance in jnp.linspace(0.1, 1, 10):
+    # for covariance in (0.05, 0.1, 0.8, 1.5):
+    for covariance in 10**jnp.linspace(-4, 0, 10):
         dp = process.brownian_motion(
             jnp.array(
                 [
@@ -176,8 +183,12 @@ def main():
             return r.sign * r.logabsdet
 
         def ll(y, y_next, dt):
-            c = -dp_bar.d / 2 * jnp.log(2 * jnp.pi) - logdet(1 * dp_bar.diffusion) / 2
-            return c - (y_next - y).T @ dp_bar.inverse_diffusion @ (y_next - y) / dt / 2
+            c = -dp.d / 2 * jnp.log(2 * jnp.pi) - logdet(dt * dp.diffusion) / 2
+            return c - (y_next - y).T @ dp.inverse_diffusion @ (y_next - y) / dt / 2
+        
+        def lla(y, t):
+            c = -dp_bar.d / 2 * jnp.log(2 * jnp.pi) - logdet(1 * dp.diffusion) / 2
+            return c - (y - 0).T @ dp.inverse_diffusion @ (y - 0) / t / 2
         
         import matplotlib.pyplot as plt
         import numpy as np
@@ -203,13 +214,14 @@ def main():
         plt.quiver(xs, ys, u, v)
 
         likelihoods = []
-        _, *point_subkeys = jax.random.split(key, 11)
-        for point_key in point_subkeys:
+        a_likelihoods = []
+        key, *point_subkeys = jax.random.split(key, 11)
+        for i, point_key in enumerate(point_subkeys):
             point = jax.random.multivariate_normal(point_key, jnp.zeros(2), jnp.array([[0.8, 0], [0, 0.8]]))
-            print(point)
+            # print(point)
 
-            _, *path_subkeys = jax.random.split(key, 11)
-            for path_subkey in path_subkeys:
+            key, *path_subkeys = jax.random.split(key, 11)
+            for j, path_subkey in enumerate(path_subkeys):
                 ts, ys, n = diffusion.get_paths(
                     dp=dp_bar,
                     key=path_subkey,
@@ -221,24 +233,36 @@ def main():
 
                 plt.plot(*ys[:n].T, linewidth=0.5, c='black', alpha=0.2)
 
-                lls = jax.jit(jax.vmap(ll))(ys[:n-1], ys[1:n], ts[1:n] - ts[:n-1])
+                # lls = jax.jit(jax.vmap(ll))(ys[:n-1], ys[1:n], ts[1:n] - ts[:n-1])
+                lls = jax.jit(jax.vmap(ll))(ys[:n-1], ys[1:n], jnp.abs(ts[1:n] - ts[:n-1]))
+                # lls = jax.jit(jax.vmap(ll))(ys[:n-1], ys[1:n], ts[:n-1] - ts[1:n])
+                # lls = jax.jit(jax.vmap(ll))(ys[1:n], ys[:n-1], ts[:n-1] - ts[1:n])
+                with open('lls.csv', 'a') as f:
+                    f.writelines(f'{covariance},{i},{j},{t},{l}\n' for t, l in enumerate(lls))
                 likelihoods.append(jnp.sum(lls))
-                print(covariance, jnp.sum(lls))
+                # llav = lla(point, 1)
+                llav = ll(ys[n-2], ys[0], jnp.abs(ts[n-2] - ts[0]))
+                a_likelihoods.append(llav)
+                # print(covariance, jnp.sum(lls), llav, ll(ys[n-2], ys[0], jnp.abs(ts[n-2] - ts[0])), ll(ys[0], ys[n-2], jnp.abs(ts[n-2] - ts[0])))
 
             plt.scatter(*point, s=10, alpha=1)
         
         r = sum(likelihoods) / len(likelihoods)
-        results.append((covariance, r))
+        approximated_likelihoods.append((covariance, r))
+        analytical_likelihoods.append((covariance, sum(a_likelihoods) / len(a_likelihoods)))
+        print(covariance, sum(likelihoods) / len(likelihoods))
+        print((covariance, sum(a_likelihoods) / len(a_likelihoods)))
         plt.title(f'Variance: {covariance:.2f}, log-likelihood: {r:.2f}')
 
         plt.xlim(a, b)
         plt.ylim(a, b)
         plt.savefig(plots_path / f'{covariance:.2f}_likelihood_investigation.png', dpi=600)
-    
-    print(results)
 
     plt.figure()
-    plt.plot(*zip(*results))
+    plt.plot(*zip(*approximated_likelihoods), label='Approximated likelihood')
+    # plt.plot(*zip(*analytical_likelihoods), label='Analytical likelihood')
+    plt.legend()
+    plt.xscale('log')
     plt.savefig(plots_path / 'likelihood.png', dpi=600)
 
 if __name__ == '__main__':
