@@ -68,7 +68,7 @@ def main():
 
         logger = loggers.CSVLogger(name='2d_mixture')
 
-        t = trainer.Trainer(500, logger=logger)
+        t = trainer.Trainer(1500, logger=logger)
         state = t.fit(
             subkey1,
             model,
@@ -87,7 +87,7 @@ def main():
     # Deliberately reuse random key
     key = jax.random.PRNGKey(1)
     y0 = jnp.zeros(dp.d)
-    yT = jnp.ones(dp.d) * 3
+    yT = jnp.ones(dp.d) * 1
 
     def f_bar_analytical(t, y):
         s = -dp.inverse_diffusion @ (y - y0) / t

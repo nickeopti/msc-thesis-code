@@ -1,5 +1,6 @@
 import argparse
 import pathlib
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -61,7 +62,7 @@ def main():
 
         logger = loggers.CSVLogger(name='1d')
 
-        t = trainer.Trainer(500, logger=logger)
+        t = trainer.Trainer(1500, logger=logger)
         state = t.fit(
             subkey1,
             model,
@@ -80,7 +81,7 @@ def main():
     # Deliberately reuse random key
     key = jax.random.PRNGKey(1)
     y0 = jnp.zeros(dp.d)
-    yT = jnp.ones(dp.d) * 3
+    yT = jnp.ones(dp.d) * 1
 
     def f_bar_analytical(t, y):
         s = -dp.inverse_diffusion @ (y - y0) / t
@@ -117,6 +118,23 @@ def main():
         t0=0,
         t1=1,
         dt=0.001,
+    )
+
+    s = lambda t, y: - dp.inverse_diffusion @ (y - y0) / t
+    illustrations.visualise_vector_field_1d(
+        score=jax.vmap(s),
+        filename=plots_path / 'analytical_score_vector_field.png',
+        t0=0.1,
+        a=-1,
+        b=1,
+    )
+
+    illustrations.visualise_vector_field_1d(
+        score=partial(state.apply_fn, state.params, c=0),
+        filename=plots_path / 'learned_score_vector_field.png',
+        t0=0.1,
+        a=-1,
+        b=1,
     )
 
 
