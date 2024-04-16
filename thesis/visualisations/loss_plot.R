@@ -8,14 +8,14 @@ library(ggplot2)
 args <- commandArgs(trailingOnly = TRUE)
 v_num <- args[2]
 if (length(args) == 1) {
-    cutoff = 10
+    cutoff <- 10
 } else {
-    cutoff = strtoi(args[3])
+    cutoff <- strtoi(args[3])
 }
 
 metrics_path <- paste(
     "logs",
-    "default",
+    args[1],
     paste("version_", v_num, sep = ""),
     "metrics.csv",
     sep = "/"
@@ -35,4 +35,17 @@ metrics %>%
         xlab("Epoch") +
         ylab("Loss")
 
-ggsave(paste("plots", paste(args[1], "_", args[2], ".png", sep = ""), sep = "/"), width = 30, height = 16, units = "cm", dpi = 600)
+ggsave(
+    paste(
+        "logs",
+        args[1],
+        paste("version_", v_num, sep = ""),
+        "loss_plot.png",
+        sep = "/"
+    ),
+    # paste("plots", paste(args[1], "_", args[2], ".png", sep = ""), sep = "/"),
+    width = 30,
+    height = 16,
+    units = "cm",
+    dpi = 600
+)
