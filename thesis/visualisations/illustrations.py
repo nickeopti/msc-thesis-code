@@ -44,6 +44,9 @@ def visualise_sample_paths_1d(dp: process.Diffusion, key, filename, n: int = 5, 
         plt.scatter(ts[n-1], ys[n-1], alpha=1)
         print(ys[n-1])
 
+    plt.xlabel('t')
+    plt.ylabel('y')
+
     plt.savefig(filename, dpi=600)
 
 
@@ -82,6 +85,9 @@ def visualise_sample_paths_f_1d(dp: process.Diffusion, key, filename, n: int = 5
         plt.scatter(ts[n-1], ys[n-1], alpha=1)
         print(ys[n-1])
 
+    plt.xlabel('t')
+    plt.ylabel('y')
+
     plt.savefig(filename, dpi=600)
 
 
@@ -98,5 +104,23 @@ def visualise_vector_field(score: Callable[[jax.Array, jax.Array], jax.Array], f
     plt.contourf(xx, yy, np.sqrt(u**2 + v**2), levels=jnp.linspace(0, val, nv))
     plt.colorbar()
     plt.quiver(xs, ys, u, v)
+
+    plt.savefig(filename, dpi=600)
+
+
+def visualise_vector_field_1d(score: Callable[[jax.Array, jax.Array], jax.Array], filename, n: int = 20, t0: float = 0.001, t1: float = 1, a: float = -3, b: float = 3, val: float = 5, nv: int = 51):
+    plt.figure()
+
+    xs = np.linspace(t0, t1, n)
+    ys = np.linspace(a, b, n)
+    xx, yy = np.meshgrid(xs, ys)
+
+    v = score(xx.reshape(-1), yy.reshape(-1, 1)).T.reshape(n, n)
+
+    plt.contourf(xx, yy, jnp.abs(v), levels=jnp.linspace(0, val, nv))
+    plt.colorbar()
+    plt.quiver(xs, ys, jnp.zeros((20, 20)), v.reshape(20, 20))
+
+    plt.xlabel('t')
 
     plt.savefig(filename, dpi=600)
