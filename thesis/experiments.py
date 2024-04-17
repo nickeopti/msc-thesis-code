@@ -54,6 +54,9 @@ class Brownian(Experiment):
         self.key, key = jax.random.split(self.key)
 
         if self.visualise_paths is not None:
+            assert hasattr(self, 'y0'), 'y0 needed to be set'
+            assert hasattr(self, 'yT'), 'yT needed to be set'
+
             for f_bar, name in (
                 (partial(self.f_bar_analytical, dp=self.dp, y0=self.y0), 'analytical'),
                 (partial(self.f_bar_learned, dp=self.dp, state=state, c=self.c), 'learned'),
@@ -94,6 +97,8 @@ class Brownian(Experiment):
             )
 
         if self.visualise_field is not None:
+            assert hasattr(self, 'y0'), 'y0 needed to be set'
+
             for score, name in (
                 (jax.vmap(partial(self.score_analytical, dp=dp, y0=self.y0)), 'analytical'),
                 (partial(self.score_learned, state=state, c=self.c), 'learned'),
@@ -209,10 +214,10 @@ class Brownian2DMixture(Brownian):
 
 
 class BrownianND(Brownian):
-    def __init__(self, key, y0: jax.Array, n: int) -> None:
+    def __init__(self, key, d: int, variance: float, n: int) -> None:
         self.key = key
-        self.y0 = y0
-        self.dp = process.brownian_motion(jnp.identity(y0.size))
+        self.y0 = jnp.zeros(d)
+        self.dp = process.brownian_motion(jnp.identity(self.y0.size) * variance)
         self.n = n
 
     def __len__(self) -> int:
@@ -226,3 +231,56 @@ class BrownianND(Brownian):
         ts, ys, n = diffusion.get_data(dp=self.dp, y0=self.y0, key=subkey)
 
         return self.dp, ts[:n], ys[:n], self.y0, 0
+
+
+class BrownianCircleLandmarks(Brownian):
+    visualise_paths = staticmethod(partial(illustrations.visualise_circle_sample_paths_f, n=1))
+
+    def __init__(self, key, k: int, radius: float, radius_T: float, variance: float, n: int) -> None:
+        self.key = key
+
+        angles = jnp.linspace(0, 2 * jnp.pi, k, endpoint=False)
+        xs = jnp.cos(angles) * radius
+        ys = jnp.sin(angles) * radius
+        self.y0 = jnp.hstack((xs, ys))
+
+        xs_T = jnp.cos(angles) * radius_T
+        ys_T = jnp.sin(angles) * radius_T
+        self.yT = jnp.hstack((xs_T, ys_T))
+
+        self.dp = process.brownian_motion(jnp.identity(2 * k) * variance)
+
+        self.c = 0
+        self.n = n
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __getitem__(self, index):
+        if index < 0 or index >= len(self):
+            raise IndexError
+
+        self.key, subkey = jax.random.split(self.key)
+        ts, ys, n = diffusion.get_data(dp=self.dp, y0=self.y0, key=subkey)
+
+        return self.dp, ts[:n], ys[:n], self.y0, 0
+
+
+class BrownianStationaryKernelCircleLandmarks(BrownianCircleLandmarks):
+    def __init__(self, key, k: int, radius: float, radius_T: float, variance: float, n: int) -> None:
+        super().__init__(key, k, radius, radius_T, variance, n)
+
+        def kernel(x, y):
+            return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / 1 / 2)
+
+        def pairwise(f, xs):
+            return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
+
+        k = jnp.vstack(
+            (
+                jnp.hstack((pairwise(kernel, jnp.vstack((self.y0[:k], self.y0[k:])).T), jnp.zeros((k, k)))),
+                jnp.hstack((jnp.zeros((k, k)), pairwise(kernel, jnp.vstack((self.y0[:k], self.y0[k:])).T)))
+            )
+        )
+
+        self.dp = process.brownian_motion(k)
