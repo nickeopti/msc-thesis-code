@@ -19,12 +19,16 @@ class Model(thesis.lightning.Module[State]):
         cv = jnp.ones_like(t) * c
         z = nn.Sequential(
             [
-                nn.Dense(16),
-                nn.tanh,
-                nn.Dense(32),
-                nn.tanh,
-                nn.Dense(16),
-                nn.tanh,
+                nn.Dense(64),
+                nn.gelu,
+                nn.Dense(128),
+                nn.gelu,
+                nn.Dense(256),
+                nn.gelu,
+                nn.Dense(128),
+                nn.gelu,
+                nn.Dense(64),
+                nn.gelu,
                 nn.Dense(self.dp.d)
             ]
         )(jnp.hstack((cv[:, None], y)))
