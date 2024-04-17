@@ -90,7 +90,7 @@ def likelihood(key, n_steps: int, covariance: jax.Array, true_covariance: jax.Ar
     return jnp.sum(jax.vmap(f)(point_subkeys)) / 100
 
 
-def main():
+def main_variance():
     key = jax.random.PRNGKey(0)
 
     with open('lls_step.csv', 'w') as f:
@@ -99,7 +99,6 @@ def main():
     true_covariance = jnp.array([[0.1, 0], [0, 0.1]])
 
     for n_steps in (1, 2, 5, 10, 20, 50, 100, 500, 1000):
-    # for n_steps in (1,):
         for variance in 10**jnp.linspace(-3, 1, 50):
             covariance = jnp.array(
                 [
@@ -114,5 +113,28 @@ def main():
                 f.write(f'{n_steps},{variance},{value}\n')
 
 
+def main_covariance():
+    key = jax.random.PRNGKey(0)
+
+    with open('lls_step_c.csv', 'w') as f:
+        f.write('n_steps,covariance,loglikelihood\n')
+
+    true_covariance = jnp.array([[1, 0], [0, 1]])
+
+    for n_steps in (1, 2, 5, 10, 20, 50, 100, 500, 1000):
+        for c in jnp.linspace(-0.8, 0.8, 20):
+            covariance = jnp.array(
+                [
+                    [1, c],
+                    [c, 1]
+                ]
+            )
+
+            value = likelihood(key, n_steps, covariance, true_covariance)
+
+            with open('lls_step_c.csv', 'a') as f:
+                f.write(f'{n_steps},{c},{value}\n')
+
+
 if __name__ == '__main__':
-    main()
+    main_covariance()
