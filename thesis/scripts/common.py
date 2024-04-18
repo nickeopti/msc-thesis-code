@@ -5,6 +5,7 @@ import jax
 import selector
 
 import thesis.experiments
+import thesis.lightning
 import thesis.models.baseline
 import thesis.processes.process
 from thesis.lightning import loggers, trainer
@@ -27,17 +28,22 @@ def main():
 
     checkpoint = selector.get_argument(parser, 'checkpoint', type=str, default=None)
 
+    model_initialiser = selector.add_options_from_module(
+        parser, 'model', thesis.models.baseline, thesis.lightning.Module,
+    )
+
     if checkpoint:
-        model, state = thesis.models.baseline.Model.load_from_checkpoint(
+        model, state = model_initialiser.func.load_from_checkpoint(
             checkpoint,
             dp=experiment.dp,
+            **model_initialiser.keywords,
         )
 
         path = pathlib.Path(checkpoint).parent
     else:
         key, subkey = jax.random.split(key)
 
-        model = thesis.models.baseline.Model(experiment.dp, learning_rate=1e-3)
+        model = model_initialiser(experiment.dp, learning_rate=1e-3)
 
         logger = loggers.CSVLogger(name=experiment.__class__.__name__)
 
