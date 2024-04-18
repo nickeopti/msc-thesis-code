@@ -1,5 +1,6 @@
 import datetime
 import itertools
+import sys
 
 import clu.metrics
 import jax
@@ -37,6 +38,9 @@ class Trainer:
             )
 
         checkpointer = checkpointers.Checkpointer(self.logger.path / 'checkpoints', state)
+
+        with open(self.logger.path / 'arguments.txt', 'x') as f:
+            f.write(' '.join(sys.argv))
 
         print(datetime.datetime.now())
 
