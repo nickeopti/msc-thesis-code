@@ -30,6 +30,7 @@ class Experiment(abc.ABC):
 class Brownian(Experiment):
     visualise_paths: Optional[Callable] = None
     visualise_field: Optional[Callable] = None
+    visualise_combination: Optional[Callable] = None
     c: float
 
     @staticmethod
@@ -100,12 +101,47 @@ class Brownian(Experiment):
             assert hasattr(self, 'y0'), 'y0 needed to be set'
 
             for score, name in (
-                (jax.vmap(partial(self.score_analytical, dp=dp, y0=self.y0)), 'analytical'),
+                (jax.vmap(partial(self.score_analytical, dp=self.dp, y0=self.y0)), 'analytical'),
                 (partial(self.score_learned, state=state, c=self.c), 'learned'),
             ):
                 self.visualise_field(
                     score=score,
                     filename=plots_path / f'{name}_score_vector_field.png',
+                )
+
+        if self.visualise_combination is not None:
+            assert hasattr(self, 'y0'), 'y0 needed to be set'
+            assert hasattr(self, 'yT'), 'yT needed to be set'
+
+            for f_bar, score, name in (
+                (
+                    partial(self.f_bar_analytical, dp=self.dp, y0=self.y0),
+                    jax.vmap(partial(self.score_analytical, dp=self.dp, y0=self.y0)),
+                    'analytical'
+                ),
+                (
+                    partial(self.f_bar_learned, dp=self.dp, state=state, c=self.c),
+                    partial(self.score_learned, state=state, c=self.c),
+                    'learned'
+                ),
+            ):
+                dp_bar = process.Diffusion(
+                    d=self.dp.d,
+                    drift=f_bar,
+                    diffusion=self.dp.diffusion,
+                    inverse_diffusion=None,
+                    diffusion_divergence=None,
+                )
+
+                self.visualise_combination(
+                    dp=dp_bar,
+                    score=score,
+                    key=key,
+                    filename=plots_path / f'{name}_bridge.png',
+                    y0=self.yT,
+                    t0=1.,
+                    t1=0.001,
+                    dt=-0.001,
                 )
 
 
@@ -284,3 +320,45 @@ class BrownianStationaryKernelCircleLandmarks(BrownianCircleLandmarks):
         )
 
         self.dp = process.brownian_motion(k)
+
+
+class BrownianStationaryKernelCircleLandmarksFactorised(BrownianCircleLandmarks):
+    visualise_paths = None
+    visualise_combination = staticmethod(partial(illustrations.visualise_circle_sample_paths_f_factorised, n=1))
+
+    def __init__(self, key, k: int, radius: float, radius_T: float, variance: float, n: int) -> None:
+        super().__init__(key, k, radius, radius_T, variance, n)
+        self.k = k
+
+        self.y0 = jnp.hstack((self.y0[:k].reshape(-1, 1), self.y0[k:].reshape(-1, 1)))
+        self.yT = jnp.hstack((self.yT[:k].reshape(-1, 1), self.yT[k:].reshape(-1, 1)))
+
+        def kernel(x, y):
+            return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / 0.1 / 2)
+
+        def pairwise(f, xs):
+            return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
+
+        k = pairwise(kernel, self.y0)
+
+        self.dp = process.brownian_motion(k)
+
+    def __getitem__(self, index):
+        if index < 0 or index >= len(self):
+            raise IndexError
+
+        self.key, subkey_x, subkey_y = jax.random.split(self.key, 3)
+        ts_x, ys_x, n_x = diffusion.get_data(dp=self.dp, y0=self.y0[:, 0], key=subkey_x)
+        ts_y, ys_y, n_y = diffusion.get_data(dp=self.dp, y0=self.y0[:, 1], key=subkey_y)
+
+        ys = jnp.dstack((ys_x[:n_x], ys_y[:n_y]))
+
+        assert n_x == n_y
+        assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
+
+        return self.dp, ts_x[:n_x], ys, self.y0, 0
+
+    @staticmethod
+    def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
+        s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]
+        return dp.drift - dp.diffusion @ s - dp.diffusion_divergence

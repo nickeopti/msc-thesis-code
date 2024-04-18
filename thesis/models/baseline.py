@@ -63,3 +63,49 @@ class Model(thesis.lightning.Module[State]):
 
     def configure_optimizers(self):
         return optax.adam(self.learning_rate)
+
+
+class Factorised(Model):
+    @nn.compact
+    def __call__(self, t, y, c):
+        cv = jnp.ones_like(t) * c
+        z = jax.vmap(
+            lambda x: nn.Sequential(
+                [
+                    nn.Dense(64),
+                    nn.gelu,
+                    nn.Dense(128),
+                    nn.gelu,
+                    nn.Dense(256),
+                    nn.gelu,
+                    nn.Dense(128),
+                    nn.gelu,
+                    nn.Dense(64),
+                    nn.gelu,
+                    nn.Dense(self.dp.d),
+                ]
+            )(jnp.hstack((cv[:, None], x))),
+            in_axes=2,
+            out_axes=2,
+        )(y)
+
+        return z / t[:, None, None]
+
+    @staticmethod
+    @jax.jit
+    def training_step(state: State, dp: process.Diffusion, ts, ys, v, c):
+        ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
+
+        def loss(p, t, y, y_next, dt):
+            return jnp.sum(
+                jax.vmap(
+                    lambda p, y, y_next: jnp.linalg.norm(p + dp.inverse_diffusion @ (y_next - y - dp.drift * dt) / dt)**2,
+                    in_axes=(1, 1, 1),
+                )(p, y, y_next)
+            )
+
+        l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
+        return jnp.mean(l)
+
+    def initialise_params(self, rng):
+        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d, 2)), 0)

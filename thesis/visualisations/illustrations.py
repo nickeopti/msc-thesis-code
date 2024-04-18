@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable
 
 import jax
@@ -153,6 +154,97 @@ def visualise_circle_sample_paths_f(dp: process.Diffusion, key, filename, n: int
 
         polygon_T = patches.Polygon(jnp.vstack((ys[0, :k], ys[0, k:])).T, fill=False)
         polygon_0 = patches.Polygon(jnp.vstack((ys[n - 1, :k], ys[n - 1, k:])).T, fill=False, linestyle='--')
+
+        plt.gca().add_patch(polygon_0)
+        plt.gca().add_patch(polygon_T)
+
+    plt.gca().set_aspect('equal')
+    plt.savefig(filename, dpi=600)
+
+
+def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, score, key, filename, n: int = 5, **kwargs):
+    plt.figure()
+    import cycler
+    plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
+
+    k = dp.d
+
+    y0 = kwargs['y0']
+    kwargs_x = kwargs.copy()
+    kwargs_y = kwargs.copy()
+    kwargs_x['y0'] = y0[:, 0]
+    kwargs_y['y0'] = y0[:, 1]
+
+    if isinstance(dp.drift, partial) and 'y0' in dp.drift.keywords:
+        dp_x = process.Diffusion(
+            d=dp.d,
+            drift=partial(dp.drift, y0=dp.drift.keywords['y0'][:, 0]),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_y = process.Diffusion(
+            d=dp.d,
+            drift=partial(dp.drift, y0=dp.drift.keywords['y0'][:, 1]),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+    else:
+        def w(f):
+            def us(t, q):
+                print(f'{q.shape=}')
+                print(f'{q[:, None].shape=}')
+                v = f(t, q[:, None])
+                print(f'{v.shape=}')
+                return v
+            return us
+        dp_x = process.Diffusion(
+            d=dp.d,
+            drift=w(dp.drift),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_y = process.Diffusion(
+            d=dp.d,
+            drift=w(dp.drift),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+
+    for _ in range(n):
+        key, subkey_x, subkey_y = jax.random.split(key, 3)
+
+        ts_x, ys_x, n_x = diffusion.get_paths(
+            dp=dp_x,
+            key=subkey_x,
+            **kwargs_x
+        )
+
+        ts_y, ys_y, n_y = diffusion.get_paths(
+            dp=dp_y,
+            key=subkey_y,
+            **kwargs_y
+        )
+
+        assert n_x == n_y
+        assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
+
+        for i in range(k):
+            plt.plot(ys_x[:n_x, i], ys_y[:n_y, i], linewidth=1, alpha=0.6, color=f'C{i}')
+            plt.scatter(ys_x[n_x - 1, i], ys_y[n_y - 1, i], alpha=1, color=f'C{i}', marker='+')
+
+        # p = jnp.hstack((ys_x[0], ys_y[0]))
+        # vector = score(ts_x[0][None], ys_x[0][None])
+        # plt.arrow(*p, *vector)
+
+        for i in range(k):
+            plt.scatter(ys_x[0, i], ys_y[0, i], alpha=1, color=f'C{i}', marker='x')
+
+        polygon_T = patches.Polygon(jnp.vstack((ys_x[0], ys_y[0])).T, fill=False)
+        polygon_0 = patches.Polygon(jnp.vstack((ys_x[n_x - 1], ys_y[n_x - 1])).T, fill=False, linestyle='--')
 
         plt.gca().add_patch(polygon_0)
         plt.gca().add_patch(polygon_T)
