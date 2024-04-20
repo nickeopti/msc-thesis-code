@@ -193,10 +193,7 @@ def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, score, key
     else:
         def w(f):
             def us(t, q):
-                print(f'{q.shape=}')
-                print(f'{q[:, None].shape=}')
                 v = f(t, q[:, None])
-                print(f'{v.shape=}')
                 return v
             return us
         dp_x = process.Diffusion(
@@ -250,4 +247,134 @@ def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, score, key
         plt.gca().add_patch(polygon_T)
 
     plt.gca().set_aspect('equal')
+    plt.savefig(filename, dpi=600)
+
+
+def visualise_circle_sample_paths_f_3d(dp: process.Diffusion, score, key, filename, n: int = 5, **kwargs):
+    ax = plt.figure().add_subplot(projection='3d')
+    import cycler
+    plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
+
+    k = dp.diffusion.shape[0] // 3
+
+    for _ in range(n):
+        key, subkey = jax.random.split(key)
+
+        _, ys, n = diffusion.get_paths(
+            dp=dp,
+            key=subkey,
+            **kwargs
+        )
+
+        for i in range(k):
+            plt.plot(*ys[:n, [i, k + i, 2 * k + i]].T, linewidth=1, alpha=0.6, color=f'C{i}')
+            # plt.scatter(*ys[n - 1, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', marker='+')
+            # plt.scatter(*ys[0, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', marker='x')
+
+        ax.plot(jnp.hstack((ys[0, :k], ys[0, 0])), jnp.hstack((ys[0, k:2*k], ys[0, k])), jnp.hstack((ys[0, 2*k:], ys[0, 2*k])), color='black')
+        ax.plot(jnp.hstack((ys[n - 1, :k], ys[n - 1, 0])), jnp.hstack((ys[n - 1, k:2*k], ys[n - 1, k])), jnp.hstack((ys[n - 1, 2*k:], ys[n - 1, 2*k])), color='black', linestyle='--')
+
+    ax.set_aspect('equalxy')
+    plt.savefig(filename, dpi=600)
+
+
+def visualise_circle_sample_paths_f_factorised_3d(dp: process.Diffusion, score, key, filename, n: int = 5, **kwargs):
+    ax = plt.figure().add_subplot(projection='3d')
+    import cycler
+    plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
+
+    k = dp.d
+
+    y0 = kwargs['y0']
+    kwargs_x = kwargs.copy()
+    kwargs_y = kwargs.copy()
+    kwargs_z = kwargs.copy()
+    kwargs_x['y0'] = y0[:, 0]
+    kwargs_y['y0'] = y0[:, 1]
+    kwargs_z['y0'] = y0[:, 2]
+
+    if isinstance(dp.drift, partial) and 'y0' in dp.drift.keywords:
+        dp_x = process.Diffusion(
+            d=dp.d,
+            drift=partial(dp.drift, y0=dp.drift.keywords['y0'][:, 0]),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_y = process.Diffusion(
+            d=dp.d,
+            drift=partial(dp.drift, y0=dp.drift.keywords['y0'][:, 1]),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_z = process.Diffusion(
+            d=dp.d,
+            drift=partial(dp.drift, y0=dp.drift.keywords['y0'][:, 2]),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+    else:
+        def w(f):
+            def us(t, q):
+                v = f(t, q[:, None])
+                return v
+            return us
+        dp_x = process.Diffusion(
+            d=dp.d,
+            drift=w(dp.drift),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_y = process.Diffusion(
+            d=dp.d,
+            drift=w(dp.drift),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_z = process.Diffusion(
+            d=dp.d,
+            drift=w(dp.drift),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+
+    for _ in range(n):
+        key, subkey_x, subkey_y, subkey_z = jax.random.split(key, 4)
+
+        ts_x, ys_x, n_x = diffusion.get_paths(
+            dp=dp_x,
+            key=subkey_x,
+            **kwargs_x
+        )
+
+        ts_y, ys_y, n_y = diffusion.get_paths(
+            dp=dp_y,
+            key=subkey_y,
+            **kwargs_y
+        )
+
+        ts_z, ys_z, n_z = diffusion.get_paths(
+            dp=dp_z,
+            key=subkey_z,
+            **kwargs_z
+        )
+
+        assert n_x == n_y == n_z
+        assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
+        assert jnp.all(ts_y[:n_y] == ts_z[:n_z])
+
+        for i in range(k):
+            ax.plot(ys_x[:n_x, i], ys_y[:n_y, i], ys_z[:n_z, i], linewidth=1, alpha=0.6, color=f'C{i}')
+            ax.scatter(ys_x[n_x - 1, i], ys_y[n_y - 1, i], ys_z[n_z - 1, i], alpha=1, color=f'C{i}', marker='+')
+            ax.scatter(ys_x[0, i], ys_y[0, i], ys_z[0, i], alpha=1, color=f'C{i}', marker='x')
+
+        ax.plot(jnp.hstack((ys_x[0], ys_x[0, 0])), jnp.hstack((ys_y[0], ys_y[0, 0])), jnp.hstack((ys_z[0], ys_z[0, 0])), color='black')
+        ax.plot(jnp.hstack((ys_x[n_x - 1], ys_x[n_x - 1, 0])), jnp.hstack((ys_y[n_y - 1], ys_y[n_y - 1, 0])), jnp.hstack((ys_z[n_z - 1], ys_z[n_z - 1, 0])), color='black', linestyle='--')
+
+    ax.set_aspect('equalxy')
     plt.savefig(filename, dpi=600)

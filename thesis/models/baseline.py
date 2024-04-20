@@ -66,6 +66,8 @@ class Model(thesis.lightning.Module[State]):
 
 
 class Factorised(Model):
+    dimensionality: int = 2
+
     @nn.compact
     def __call__(self, t, y, c):
         cv = jnp.ones_like(t) * c
@@ -108,4 +110,4 @@ class Factorised(Model):
         return jnp.mean(l)
 
     def initialise_params(self, rng):
-        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d, 2)), 0)
+        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d, self.dimensionality)), 0)
