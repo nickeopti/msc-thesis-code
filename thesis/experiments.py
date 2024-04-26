@@ -469,3 +469,76 @@ class BrownianStationaryKernelCircleLandmarks3DFactorised(Brownian):
     def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
         s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]
         return dp.drift - dp.diffusion @ s - dp.diffusion_divergence
+
+
+class BrownianStationaryKernelBallLandmarks3DFactorised(Brownian):
+    visualise_paths = None
+    visualise_combination = staticmethod(partial(illustrations.visualise_circle_sample_paths_f_factorised_3d_ball, n=1))
+
+    def __init__(self, key, k: int, radius: float, radius_T: float, variance: float, n: int, gamma: float = 0.1) -> None:
+        self.key = key
+
+        # Fibonacci lattice / sphere
+        # https://observablehq.com/@meetamit/fibonacci-lattices
+        gr = (1 + jnp.sqrt(5)) / 2  # golden ratio
+
+        def x(i):
+            return (i * gr) % 1
+        
+        def y(i, n):
+            return i / (n - 1)
+        
+        def theta(i):
+            return x(i) * 2 * jnp.pi
+        
+        def phi(i, n):
+            return jnp.acos(1 - 2 * y(i, n))
+
+        def f(i, n):
+            return (
+                jnp.cos(theta(i)) * jnp.sin(phi(i, n)),
+                jnp.cos(phi(i, n)),
+                jnp.sin(theta(i)) * jnp.sin(phi(i, n)),
+            )
+        
+        points = jnp.vstack(tuple(f(i, k) for i in range(k)))
+        self.y0 = points * radius
+        self.yT = points * radius_T
+
+        def kernel(x, y):
+            return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
+
+        def pairwise(f, xs):
+            return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
+
+        k = pairwise(kernel, self.y0)
+
+        self.dp = process.brownian_motion(k)
+
+        self.c = 0
+        self.n = n
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __getitem__(self, index):
+        if index < 0 or index >= len(self):
+            raise IndexError
+
+        self.key, subkey_x, subkey_y, subkey_z = jax.random.split(self.key, 4)
+        ts_x, ys_x, n_x = diffusion.get_data(dp=self.dp, y0=self.y0[:, 0], key=subkey_x)
+        ts_y, ys_y, n_y = diffusion.get_data(dp=self.dp, y0=self.y0[:, 1], key=subkey_y)
+        ts_z, ys_z, n_z = diffusion.get_data(dp=self.dp, y0=self.y0[:, 2], key=subkey_z)
+
+        assert n_x == n_y == n_z
+        assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
+        assert jnp.all(ts_y[:n_y] == ts_z[:n_z])
+
+        ys = jnp.dstack((ys_x[:n_x], ys_y[:n_y], ys_z[:n_z]))
+
+        return self.dp, ts_x[:n_x], ys, self.y0, 0
+
+    @staticmethod
+    def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
+        s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]
+        return dp.drift - dp.diffusion @ s - dp.diffusion_divergence

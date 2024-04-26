@@ -378,3 +378,105 @@ def visualise_circle_sample_paths_f_factorised_3d(dp: process.Diffusion, score, 
 
     ax.set_aspect('equalxy')
     plt.savefig(filename, dpi=600)
+
+
+def visualise_circle_sample_paths_f_factorised_3d_ball(dp: process.Diffusion, score, key, filename, n: int = 5, **kwargs):
+    import cycler
+    plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
+
+    fig = plt.figure()
+    axT = fig.add_subplot(1, 2, 1, projection='3d')
+    ax0 = fig.add_subplot(1, 2, 2, projection='3d', sharex=axT, sharey=axT, sharez=axT)
+
+    k = dp.d
+
+    y0 = kwargs['y0']
+    kwargs_x = kwargs.copy()
+    kwargs_y = kwargs.copy()
+    kwargs_z = kwargs.copy()
+    kwargs_x['y0'] = y0[:, 0]
+    kwargs_y['y0'] = y0[:, 1]
+    kwargs_z['y0'] = y0[:, 2]
+
+    if isinstance(dp.drift, partial) and 'y0' in dp.drift.keywords:
+        dp_x = process.Diffusion(
+            d=dp.d,
+            drift=partial(dp.drift, y0=dp.drift.keywords['y0'][:, 0]),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_y = process.Diffusion(
+            d=dp.d,
+            drift=partial(dp.drift, y0=dp.drift.keywords['y0'][:, 1]),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_z = process.Diffusion(
+            d=dp.d,
+            drift=partial(dp.drift, y0=dp.drift.keywords['y0'][:, 2]),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+    else:
+        def w(f):
+            def us(t, q):
+                v = f(t, q[:, None])
+                return v
+            return us
+        dp_x = process.Diffusion(
+            d=dp.d,
+            drift=w(dp.drift),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_y = process.Diffusion(
+            d=dp.d,
+            drift=w(dp.drift),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+        dp_z = process.Diffusion(
+            d=dp.d,
+            drift=w(dp.drift),
+            diffusion=dp.diffusion,
+            inverse_diffusion=dp.inverse_diffusion,
+            diffusion_divergence=dp.diffusion_divergence,
+        )
+
+    for _ in range(n):
+        key, subkey_x, subkey_y, subkey_z = jax.random.split(key, 4)
+
+        ts_x, ys_x, n_x = diffusion.get_paths(
+            dp=dp_x,
+            key=subkey_x,
+            **kwargs_x
+        )
+
+        ts_y, ys_y, n_y = diffusion.get_paths(
+            dp=dp_y,
+            key=subkey_y,
+            **kwargs_y
+        )
+
+        ts_z, ys_z, n_z = diffusion.get_paths(
+            dp=dp_z,
+            key=subkey_z,
+            **kwargs_z
+        )
+
+        assert n_x == n_y == n_z
+        assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
+        assert jnp.all(ts_y[:n_y] == ts_z[:n_z])
+
+        for i in range(k):
+            axT.scatter(ys_x[0, i], ys_y[0, i], ys_z[0, i], alpha=1, color=f'C{i}', marker='+')
+            ax0.scatter(ys_x[n_x - 1, i], ys_y[n_y - 1, i], ys_z[n_z - 1, i], alpha=1, color=f'C{i}', marker='+')
+
+    ax0.set_aspect('equal')
+    axT.set_aspect('equal')
+    plt.savefig(filename, dpi=600)
