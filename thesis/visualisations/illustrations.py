@@ -11,7 +11,7 @@ import thesis.processes.diffusion as diffusion
 import thesis.processes.process as process
 
 
-def visualise_sample_paths(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+def visualise_sample_paths(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     plt.figure()
 
     for _ in range(n):
@@ -22,15 +22,15 @@ def visualise_sample_paths(dp: process.Diffusion, key, filename, n: int = 5, **k
             key=subkey,
             **kwargs
         )
+        ys += displacement
 
         plt.plot(*ys[:n].T, linewidth=1, alpha=0.6)
         plt.scatter(*ys[n-1], alpha=1)
-        print(ys[n-1])
 
     plt.savefig(filename, dpi=600)
 
 
-def visualise_sample_paths_1d(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+def visualise_sample_paths_1d(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     plt.figure()
 
     for _ in range(n):
@@ -41,10 +41,10 @@ def visualise_sample_paths_1d(dp: process.Diffusion, key, filename, n: int = 5, 
             key=subkey,
             **kwargs
         )
+        ys += displacement
 
         plt.plot(ts[:n], ys[:n, 0], linewidth=1, alpha=0.6)
         plt.scatter(ts[n-1], ys[n-1], alpha=1)
-        print(ys[n-1])
 
     plt.xlabel('t')
     plt.ylabel('y')
@@ -52,7 +52,7 @@ def visualise_sample_paths_1d(dp: process.Diffusion, key, filename, n: int = 5, 
     plt.savefig(filename, dpi=600)
 
 
-def visualise_sample_paths_f(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+def visualise_sample_paths_f(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     plt.figure()
 
     for _ in range(n):
@@ -63,15 +63,15 @@ def visualise_sample_paths_f(dp: process.Diffusion, key, filename, n: int = 5, *
             key=subkey,
             **kwargs
         )
+        ys += displacement
 
         plt.plot(*ys[:n].T, linewidth=1, alpha=0.6)
         plt.scatter(*ys[n-1], alpha=1)
-        print(ys[n-1])
 
     plt.savefig(filename, dpi=600)
 
 
-def visualise_sample_paths_f_1d(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+def visualise_sample_paths_f_1d(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     plt.figure()
 
     for _ in range(n):
@@ -82,10 +82,10 @@ def visualise_sample_paths_f_1d(dp: process.Diffusion, key, filename, n: int = 5
             key=subkey,
             **kwargs
         )
+        ys += displacement
 
         plt.plot(ts[:n], ys[:n, 0], linewidth=1, alpha=0.6)
         plt.scatter(ts[n-1], ys[n-1], alpha=1)
-        print(ys[n-1])
 
     plt.xlabel('t')
     plt.ylabel('y')
@@ -128,7 +128,7 @@ def visualise_vector_field_1d(score: Callable[[jax.Array, jax.Array], jax.Array]
     plt.savefig(filename, dpi=600)
 
 
-def visualise_circle_sample_paths_f(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+def visualise_circle_sample_paths_f(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     plt.figure()
     import cycler
     plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
@@ -143,9 +143,9 @@ def visualise_circle_sample_paths_f(dp: process.Diffusion, key, filename, n: int
             key=subkey,
             **kwargs
         )
+        ys += displacement
 
         for i in range(k):
-            # print(i, *ys[0, [i, k + i]])
             plt.plot(*ys[:n, [i, k + i]].T, linewidth=1, alpha=0.6, color=f'C{i}')
             plt.scatter(*ys[n - 1, [i, k + i]], alpha=1, color=f'C{i}', marker='+')
 
@@ -162,7 +162,7 @@ def visualise_circle_sample_paths_f(dp: process.Diffusion, key, filename, n: int
     plt.savefig(filename, dpi=600)
 
 
-def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
+def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     plt.figure()
     import cycler
     plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
@@ -226,16 +226,15 @@ def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, key, filen
             **kwargs_y
         )
 
+        ys_x += displacement[:, 0]
+        ys_y += displacement[:, 1]
+
         assert n_x == n_y
         assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
 
         for i in range(k):
             plt.plot(ys_x[:n_x, i], ys_y[:n_y, i], linewidth=1, alpha=0.6, color=f'C{i}')
             plt.scatter(ys_x[n_x - 1, i], ys_y[n_y - 1, i], alpha=1, color=f'C{i}', marker='+')
-
-        # p = jnp.hstack((ys_x[0], ys_y[0]))
-        # vector = score(ts_x[0][None], ys_x[0][None])
-        # plt.arrow(*p, *vector)
 
         for i in range(k):
             plt.scatter(ys_x[0, i], ys_y[0, i], alpha=1, color=f'C{i}', marker='x')
@@ -250,7 +249,7 @@ def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, key, filen
     plt.savefig(filename, dpi=600)
 
 
-def visualise_circle_sample_paths_f_3d(dp: process.Diffusion, score, key, filename, n: int = 5, **kwargs):
+def visualise_circle_sample_paths_f_3d(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     ax = plt.figure().add_subplot(projection='3d')
     import cycler
     plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
@@ -265,6 +264,7 @@ def visualise_circle_sample_paths_f_3d(dp: process.Diffusion, score, key, filena
             key=subkey,
             **kwargs
         )
+        ys += displacement
 
         for i in range(k):
             plt.plot(*ys[:n, [i, k + i, 2 * k + i]].T, linewidth=1, alpha=0.6, color=f'C{i}')
@@ -278,7 +278,7 @@ def visualise_circle_sample_paths_f_3d(dp: process.Diffusion, score, key, filena
     plt.savefig(filename, dpi=600)
 
 
-def visualise_circle_sample_paths_f_factorised_3d(dp: process.Diffusion, score, key, filename, n: int = 5, **kwargs):
+def visualise_circle_sample_paths_f_factorised_3d(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     ax = plt.figure().add_subplot(projection='3d')
     import cycler
     plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
@@ -364,6 +364,10 @@ def visualise_circle_sample_paths_f_factorised_3d(dp: process.Diffusion, score, 
             **kwargs_z
         )
 
+        ys_x += displacement[:, 0]
+        ys_y += displacement[:, 1]
+        ys_z += displacement[:, 2]
+
         assert n_x == n_y == n_z
         assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
         assert jnp.all(ts_y[:n_y] == ts_z[:n_z])
@@ -380,7 +384,7 @@ def visualise_circle_sample_paths_f_factorised_3d(dp: process.Diffusion, score, 
     plt.savefig(filename, dpi=600)
 
 
-def visualise_circle_sample_paths_f_factorised_3d_ball(dp: process.Diffusion, score, key, filename, n: int = 5, **kwargs):
+def visualise_circle_sample_paths_f_factorised_3d_ball(dp: process.Diffusion, displacement: jax.Array, key, filename, n: int = 5, **kwargs):
     import cycler
     plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
 
@@ -468,6 +472,10 @@ def visualise_circle_sample_paths_f_factorised_3d_ball(dp: process.Diffusion, sc
             key=subkey_z,
             **kwargs_z
         )
+
+        ys_x += displacement[:, 0]
+        ys_y += displacement[:, 1]
+        ys_z += displacement[:, 2]
 
         assert n_x == n_y == n_z
         assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
