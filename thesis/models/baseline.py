@@ -35,28 +35,32 @@ class Model(thesis.lightning.Module[State]):
 
         return z / t[:, None]
 
-    @staticmethod
-    @jax.jit
-    def training_step(state: State, dp: process.Diffusion, ts, ys, v, c):
-        ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
+    def make_training_step(self):
+        @jax.jit
+        def training_step(state: State, ts, ys, v, c):
+            ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
 
-        def loss(p, t, y, y_next, dt):
-            return jnp.linalg.norm(p + dp.inverse_diffusion @ (y_next - y - dp.drift * dt) / dt)**2
+            def loss(p, t, y, y_next, dt):
+                return jnp.linalg.norm(p + self.dp.inverse_diffusion(t, y) @ (y_next - y - self.dp.drift(t, y) * dt) / dt)**2
 
-        l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
-        return jnp.mean(l)
+            l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
+            return jnp.mean(l)
 
-    @staticmethod
-    @jax.jit
-    def validation_step(state: State, dp: process.Diffusion, ts, ys, v, c):
-        ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
+        return training_step
 
-        def loss(p, t, y):
-            psi = -dp.inverse_diffusion @ (y - v) / t
-            return jnp.linalg.norm(p - psi)**2
+    def make_validation_step(self):
+        @jax.jit
+        def validation_step(state: State, ts, ys, v, c):
+            ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
 
-        l = jax.vmap(loss)(ps, ts[1:], ys[1:])
-        return jnp.mean(l)
+            def loss(p, t, y):
+                psi = -self.dp.inverse_diffusion(t, y) @ (y - v) / t
+                return jnp.linalg.norm(p - psi)**2
+
+            l = jax.vmap(loss)(ps, ts[1:], ys[1:])
+            return jnp.mean(l)
+
+        return validation_step
 
     def initialise_params(self, rng):
         return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d)), 0)
@@ -93,21 +97,24 @@ class Factorised(Model):
 
         return z / t[:, None, None]
 
-    @staticmethod
-    @jax.jit
-    def training_step(state: State, dp: process.Diffusion, ts, ys, v, c):
-        ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
+    def make_training_step(self):
+        @jax.jit
+        def training_step(state: State, ts, ys, v, c):
+            ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
 
-        def loss(p, t, y, y_next, dt):
-            return jnp.sum(
-                jax.vmap(
-                    lambda p, y, y_next: jnp.linalg.norm(p + dp.inverse_diffusion @ (y_next - y - dp.drift * dt) / dt)**2,
-                    in_axes=(1, 1, 1),
-                )(p, y, y_next)
-            )
+            def loss(p, t, y, y_next, dt):
+                return jnp.sum(
+                    jax.vmap(
+                        lambda p, y, y_next: jnp.linalg.norm(p + self.dp.inverse_diffusion(t, y) @ (y_next - y - self.dp.drift(t, y) * dt) / dt)**2,
+                        # lambda p, y, y_next: p.T @ self.dp.diffusion(t, y) @ p + 2 * p.T @ (y_next - y - self.dp.drift(t, y) * dt),
+                        in_axes=(1, 1, 1),
+                    )(p, y, y_next)
+                )
 
-        l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
-        return jnp.mean(l)
+            l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
+            return jnp.mean(l)
+        
+        return training_step
 
     def initialise_params(self, rng):
         return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d, self.dimensionality)), 0)
