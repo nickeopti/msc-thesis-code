@@ -20,8 +20,23 @@ dependencies = [
     "tqdm",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "mypy",
+    "ruff",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 namespaces = false
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F"]
+
+[tool.ruff.format]
+quote-style = "single"
 
 [project.scripts]
