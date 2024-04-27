@@ -35,7 +35,7 @@ class Brownian(Experiment):
 
     @staticmethod
     def score_analytical(t, y, dp: process.Diffusion, y0):
-        return -dp.inverse_diffusion @ (y - y0) / t
+        return -dp.inverse_diffusion(t, y) @ (y - y0) / t
     
     @staticmethod
     def score_learned(t, y, state: train_state.TrainState, c: float):
@@ -43,13 +43,13 @@ class Brownian(Experiment):
 
     @staticmethod
     def f_bar_analytical(t, y, dp: process.Diffusion, y0):
-        s = -dp.inverse_diffusion @ (y - y0) / t
-        return dp.drift - dp.diffusion @ s - dp.diffusion_divergence
+        s = -dp.inverse_diffusion(t, y) @ (y - y0) / t
+        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
 
     @staticmethod
     def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
         s = state.apply_fn(state.params, t[None], y[None], c)[0]
-        return dp.drift - dp.diffusion @ s - dp.diffusion_divergence
+        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
 
     def visualise(self, state: train_state.TrainState, plots_path: pathlib.Path):
         self.key, key = jax.random.split(self.key)
@@ -80,15 +80,8 @@ class Brownian(Experiment):
                     dt=-0.001,
                 )
 
-            dp = process.Diffusion(
-                d=self.dp.d,
-                drift=lambda t, y: self.dp.drift,
-                diffusion=self.dp.diffusion,
-                inverse_diffusion=self.dp.inverse_diffusion,
-                diffusion_divergence=self.dp.diffusion_divergence,
-            )
             self.visualise_paths(
-                dp=dp,
+                dp=self.dp,
                 key=key,
                 filename=plots_path / 'unconditional.png',
                 y0=self.y0,
@@ -157,6 +150,8 @@ class Brownian1D(Brownian):
         self.dp = process.brownian_motion(jnp.array([[variance]]))
         self.n = n
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __len__(self) -> int:
         return self.n
 
@@ -165,9 +160,9 @@ class Brownian1D(Brownian):
             raise IndexError
 
         self.key, subkey = jax.random.split(self.key)
-        ts, ys, n = diffusion.get_data(dp=self.dp, y0=self.y0, key=subkey)
+        ts, ys, n = self.get_data(self.y0, subkey)
 
-        return self.dp, ts[:n], ys[:n], self.y0, 0
+        return ts[:n], ys[:n], self.y0, 0
 
 
 class Brownian2D(Brownian):
@@ -189,6 +184,8 @@ class Brownian2D(Brownian):
         )
         self.n = n
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __len__(self) -> int:
         return self.n
 
@@ -197,9 +194,9 @@ class Brownian2D(Brownian):
             raise IndexError
 
         self.key, subkey = jax.random.split(self.key)
-        ts, ys, n = diffusion.get_data(dp=self.dp, y0=self.y0, key=subkey)
+        ts, ys, n = self.get_data(self.y0, subkey)
 
-        return self.dp, ts[:n], ys[:n], self.y0, self.dp.diffusion[0, 1]
+        return ts[:n], ys[:n], self.y0, self.c
 
 
 class Brownian2DMixture(Brownian):
@@ -221,6 +218,8 @@ class Brownian2DMixture(Brownian):
         )
         self.n = n
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __len__(self) -> int:
         return self.n
 
@@ -235,17 +234,17 @@ class Brownian2DMixture(Brownian):
                 y0 = jnp.ones(2)
 
         self.key, subkey = jax.random.split(self.key)
-        ts, ys, n = diffusion.get_data(dp=self.dp, y0=y0, key=subkey)
+        ts, ys, n = self.get_data(y0=y0, key=subkey)
 
-        return self.dp, ts[:n], ys[:n], y0, self.dp.diffusion[0, 1]
+        return ts[:n], ys[:n], y0, self.c
     
     @staticmethod
     def score_analytical(t, y, dp: process.Diffusion, y0):
         y0_1 = -jnp.ones(2)
         y0_2 = jnp.ones(2)
 
-        a = lambda t, y, y0: jnp.exp(-(y - y0).T @ dp.inverse_diffusion @ (y - y0) / t)
-        b = lambda t, y, y0: dp.inverse_diffusion @ (y - y0) * a(t, y, y0) / t
+        a = lambda t, y, y0: jnp.exp(-(y - y0).T @ dp.inverse_diffusion(t, y) @ (y - y0) / t)
+        b = lambda t, y, y0: dp.inverse_diffusion(t, y) @ (y - y0) * a(t, y, y0) / t
         return -1 / (a(t, y, y0_1) + a(t, y, y0_2)) * (b(t, y, y0_1) + b(t, y, y0_2))
 
 
@@ -256,6 +255,8 @@ class BrownianND(Brownian):
         self.dp = process.brownian_motion(jnp.identity(self.y0.size) * variance)
         self.n = n
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __len__(self) -> int:
         return self.n
 
@@ -264,9 +265,9 @@ class BrownianND(Brownian):
             raise IndexError
 
         self.key, subkey = jax.random.split(self.key)
-        ts, ys, n = diffusion.get_data(dp=self.dp, y0=self.y0, key=subkey)
+        ts, ys, n = self.get_data(y0=self.y0, key=subkey)
 
-        return self.dp, ts[:n], ys[:n], self.y0, 0
+        return ts[:n], ys[:n], self.y0, 0
 
 
 class BrownianCircleLandmarks(Brownian):
@@ -289,6 +290,8 @@ class BrownianCircleLandmarks(Brownian):
         self.c = 0
         self.n = n
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __len__(self) -> int:
         return self.n
 
@@ -297,9 +300,9 @@ class BrownianCircleLandmarks(Brownian):
             raise IndexError
 
         self.key, subkey = jax.random.split(self.key)
-        ts, ys, n = diffusion.get_data(dp=self.dp, y0=self.y0, key=subkey)
+        ts, ys, n = self.get_data(y0=self.y0, key=subkey)
 
-        return self.dp, ts[:n], ys[:n], self.y0, 0
+        return ts[:n], ys[:n], self.y0, 0
 
 
 class BrownianStationaryKernelCircleLandmarks(BrownianCircleLandmarks):
@@ -320,6 +323,8 @@ class BrownianStationaryKernelCircleLandmarks(BrownianCircleLandmarks):
         )
 
         self.dp = process.brownian_motion(k)
+
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
 
 
 class BrownianStationaryKernelCircleLandmarksFactorised(BrownianCircleLandmarks):
@@ -343,25 +348,27 @@ class BrownianStationaryKernelCircleLandmarksFactorised(BrownianCircleLandmarks)
 
         self.dp = process.brownian_motion(k)
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __getitem__(self, index):
         if index < 0 or index >= len(self):
             raise IndexError
 
         self.key, subkey_x, subkey_y = jax.random.split(self.key, 3)
-        ts_x, ys_x, n_x = diffusion.get_data(dp=self.dp, y0=self.y0[:, 0], key=subkey_x)
-        ts_y, ys_y, n_y = diffusion.get_data(dp=self.dp, y0=self.y0[:, 1], key=subkey_y)
+        ts_x, ys_x, n_x = self.get_data(y0=self.y0[:, 0], key=subkey_x)
+        ts_y, ys_y, n_y = self.get_data(y0=self.y0[:, 1], key=subkey_y)
 
         ys = jnp.dstack((ys_x[:n_x], ys_y[:n_y]))
 
         assert n_x == n_y
         assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
 
-        return self.dp, ts_x[:n_x], ys, self.y0, 0
+        return ts_x[:n_x], ys, self.y0, 0
 
     @staticmethod
     def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
         s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]
-        return dp.drift - dp.diffusion @ s - dp.diffusion_divergence
+        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
 
 
 class BrownianStationaryKernelCircleLandmarks3D(Brownian):
@@ -401,6 +408,8 @@ class BrownianStationaryKernelCircleLandmarks3D(Brownian):
         self.c = 0
         self.n = n
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __len__(self) -> int:
         return self.n
 
@@ -409,9 +418,9 @@ class BrownianStationaryKernelCircleLandmarks3D(Brownian):
             raise IndexError
 
         self.key, subkey = jax.random.split(self.key)
-        ts, ys, n = diffusion.get_data(dp=self.dp, y0=self.y0, key=subkey)
+        ts, ys, n = self.get_data(y0=self.y0, key=subkey)
 
-        return self.dp, ts[:n], ys[:n], self.y0, 0
+        return ts[:n], ys[:n], self.y0, 0
 
 
 class BrownianStationaryKernelCircleLandmarks3DFactorised(Brownian):
@@ -445,6 +454,8 @@ class BrownianStationaryKernelCircleLandmarks3DFactorised(Brownian):
         self.c = 0
         self.n = n
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __len__(self) -> int:
         return self.n
 
@@ -453,9 +464,9 @@ class BrownianStationaryKernelCircleLandmarks3DFactorised(Brownian):
             raise IndexError
 
         self.key, subkey_x, subkey_y, subkey_z = jax.random.split(self.key, 4)
-        ts_x, ys_x, n_x = diffusion.get_data(dp=self.dp, y0=self.y0[:, 0], key=subkey_x)
-        ts_y, ys_y, n_y = diffusion.get_data(dp=self.dp, y0=self.y0[:, 1], key=subkey_y)
-        ts_z, ys_z, n_z = diffusion.get_data(dp=self.dp, y0=self.y0[:, 2], key=subkey_z)
+        ts_x, ys_x, n_x = self.get_data(y0=self.y0[:, 0], key=subkey_x)
+        ts_y, ys_y, n_y = self.get_data(y0=self.y0[:, 1], key=subkey_y)
+        ts_z, ys_z, n_z = self.get_data(y0=self.y0[:, 2], key=subkey_z)
 
         assert n_x == n_y == n_z
         assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
@@ -463,12 +474,12 @@ class BrownianStationaryKernelCircleLandmarks3DFactorised(Brownian):
 
         ys = jnp.dstack((ys_x[:n_x], ys_y[:n_y], ys_z[:n_z]))
 
-        return self.dp, ts_x[:n_x], ys, self.y0, 0
+        return ts_x[:n_x], ys, self.y0, 0
 
     @staticmethod
     def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
         s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]
-        return dp.drift - dp.diffusion @ s - dp.diffusion_divergence
+        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
 
 
 class BrownianStationaryKernelBallLandmarks3DFactorised(Brownian):
@@ -518,6 +529,8 @@ class BrownianStationaryKernelBallLandmarks3DFactorised(Brownian):
         self.c = 0
         self.n = n
 
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
     def __len__(self) -> int:
         return self.n
 
@@ -526,9 +539,9 @@ class BrownianStationaryKernelBallLandmarks3DFactorised(Brownian):
             raise IndexError
 
         self.key, subkey_x, subkey_y, subkey_z = jax.random.split(self.key, 4)
-        ts_x, ys_x, n_x = diffusion.get_data(dp=self.dp, y0=self.y0[:, 0], key=subkey_x)
-        ts_y, ys_y, n_y = diffusion.get_data(dp=self.dp, y0=self.y0[:, 1], key=subkey_y)
-        ts_z, ys_z, n_z = diffusion.get_data(dp=self.dp, y0=self.y0[:, 2], key=subkey_z)
+        ts_x, ys_x, n_x = self.get_data(y0=self.y0[:, 0], key=subkey_x)
+        ts_y, ys_y, n_y = self.get_data(y0=self.y0[:, 1], key=subkey_y)
+        ts_z, ys_z, n_z = self.get_data(y0=self.y0[:, 2], key=subkey_z)
 
         assert n_x == n_y == n_z
         assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
@@ -536,9 +549,9 @@ class BrownianStationaryKernelBallLandmarks3DFactorised(Brownian):
 
         ys = jnp.dstack((ys_x[:n_x], ys_y[:n_y], ys_z[:n_z]))
 
-        return self.dp, ts_x[:n_x], ys, self.y0, 0
+        return ts_x[:n_x], ys, self.y0, 0
 
     @staticmethod
     def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
         s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]
-        return dp.drift - dp.diffusion @ s - dp.diffusion_divergence
+        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)

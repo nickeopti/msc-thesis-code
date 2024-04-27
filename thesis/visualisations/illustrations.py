@@ -133,7 +133,7 @@ def visualise_circle_sample_paths_f(dp: process.Diffusion, key, filename, n: int
     import cycler
     plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
 
-    k = dp.diffusion.shape[0] // 2
+    k = dp.d // 2
 
     for _ in range(n):
         key, subkey = jax.random.split(key)
@@ -255,7 +255,7 @@ def visualise_circle_sample_paths_f_3d(dp: process.Diffusion, score, key, filena
     import cycler
     plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
 
-    k = dp.diffusion.shape[0] // 3
+    k = dp.d // 3
 
     for _ in range(n):
         key, subkey = jax.random.split(key)

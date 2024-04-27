@@ -1,5 +1,4 @@
 import math
-from functools import partial
 from typing import Type
 
 import equinox as eqx
@@ -22,7 +21,6 @@ class ReverseVirtualBrownianTree(VirtualBrownianTree):
         return super().evaluate(1 - t0, 1 - t1, left, use_levy)
 
 
-@partial(jax.jit, static_argnames=['t0', 't1', 'dt'])
 def get_data(
     dp: process.Diffusion,
     y0: jax.Array,
@@ -31,11 +29,11 @@ def get_data(
     t1: float = 1,
     dt: float = 0.01,
 ):
-    d = dp.diffusion.shape[0]
+    d = dp.d
     brownian_motion = VirtualBrownianTree(min(t0, t1), max(t0, t1), tol=1e-3, shape=(d,), key=key)
 
-    drift_term = ODETerm(lambda t, y, _: dp.drift)
-    diffusion_term = ControlTerm(lambda t, y, _: dp.diffusion, brownian_motion)
+    drift_term = ODETerm(lambda t, y, _: dp.drift(t, y))
+    diffusion_term = ControlTerm(lambda t, y, _: dp.diffusion(t, y), brownian_motion)
     terms = MultiTerm(drift_term, diffusion_term)
 
     solver = Euler()
@@ -57,11 +55,11 @@ def get_paths(
     max_steps: int = 2000,
     brownian_tree_class: Type[VirtualBrownianTree] = VirtualBrownianTree,
 ):
-    d = dp.diffusion.shape[0]
+    d = dp.d
     brownian_motion = brownian_tree_class(min(t0, t1), max(t0, t1), tol=1e-3, shape=(d,), key=key)
 
     drift_term = ODETerm(lambda t, y, _: dp.drift(t, y))
-    diffusion_term = ControlTerm(lambda t, y, _: dp.diffusion, brownian_motion)
+    diffusion_term = ControlTerm(lambda t, y, _: dp.diffusion(t, y), brownian_motion)
     terms = MultiTerm(drift_term, diffusion_term)
 
     solver = Euler()

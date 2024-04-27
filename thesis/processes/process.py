@@ -9,21 +9,23 @@ Function = Callable[[jax.Array, jax.Array], jax.Array]
 
 class Diffusion(struct.PyTreeNode):
     d: int
-    drift: jax.Array
-    diffusion: jax.Array
-    inverse_diffusion: jax.Array
-    diffusion_divergence: jax.Array
+    drift: Function
+    diffusion: Function
+    inverse_diffusion: Function
+    diffusion_divergence: Function
 
 
 def brownian_motion(covariance: jax.Array) -> Diffusion:
     assert covariance.ndim == 2
     assert covariance.shape[0] == covariance.shape[1]
+
     d = covariance.shape[0]
+    inverse_covariance = jnp.linalg.inv(covariance)
 
     return Diffusion(
         d=d,
-        drift=jnp.zeros(d),
-        diffusion=covariance,
-        inverse_diffusion=jnp.linalg.inv(covariance),
-        diffusion_divergence=jnp.zeros(d),
+        drift=lambda t, y: jnp.zeros(d),
+        diffusion=lambda t, y: covariance,
+        inverse_diffusion=lambda t, y: inverse_covariance,
+        diffusion_divergence=lambda t, y: jnp.zeros(d),
     )
