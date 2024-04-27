@@ -5,6 +5,7 @@ from typing import Any, Callable, Optional
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from flax.training import train_state
 
 import thesis.processes.diffusion as diffusion
@@ -583,6 +584,104 @@ class KunitaKernelCircleLandmarksFactorised(BrownianCircleLandmarks):
         self.dp = process.kunita_flow(k, variance, gamma)
 
         self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=jnp.zeros_like(y0) if self.displacement else y0, key=key))
+
+    def __getitem__(self, index):
+        if index < 0 or index >= len(self):
+            raise IndexError
+
+        self.key, subkey_x, subkey_y = jax.random.split(self.key, 3)
+        ts_x, ys_x, n_x = self.get_data(y0=self.y0[:, 0], key=subkey_x)
+        ts_y, ys_y, n_y = self.get_data(y0=self.y0[:, 1], key=subkey_y)
+
+        ys = jnp.dstack((ys_x[:n_x], ys_y[:n_y]))
+
+        assert n_x == n_y
+        assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
+
+        return ts_x[:n_x], ys, self.y0, 0
+
+    @staticmethod
+    def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
+        s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]
+        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
+
+
+class BrownianButterflyLandmarks(Brownian):
+    visualise_paths = staticmethod(partial(illustrations.visualise_circle_sample_paths_f, n=1))
+
+    def __init__(self, key, butterfly_a: str, butterfly_b: str, displacement: bool, variance: float, gamma: float, every: int, n: int) -> None:
+        self.key = key
+
+        a: np.ndarray = np.load(butterfly_a)[::every]
+        self.y0 = jnp.hstack((a[:, 0].reshape(-1), a[:, 1].reshape(-1)))
+        b: np.ndarray = np.load(butterfly_b)[::every]
+        self.yT = jnp.hstack((b[:, 0].reshape(-1), b[:, 1].reshape(-1)))
+
+        k = a.shape[0]
+
+        self.displacement = displacement
+
+        self.c = 0
+        self.n = n
+
+        def kernel(x, y):
+            return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
+
+        def pairwise(f, xs):
+            return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
+
+        k = jnp.vstack(
+            (
+                jnp.hstack((pairwise(kernel, jnp.vstack((self.y0[:k], self.y0[k:])).T), jnp.zeros((k, k)))),
+                jnp.hstack((jnp.zeros((k, k)), pairwise(kernel, jnp.vstack((self.y0[:k], self.y0[k:])).T)))
+            )
+        )
+
+        self.dp = process.brownian_motion(k)
+
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=jnp.zeros_like(y0) if self.displacement else y0, key=key))
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __getitem__(self, index):
+        if index < 0 or index >= len(self):
+            raise IndexError
+
+        self.key, subkey = jax.random.split(self.key)
+        ts, ys, n = self.get_data(y0=self.y0, key=subkey)
+
+        return ts[:n], ys[:n], self.y0, 0
+
+
+class BrownianButterflyLandmarksFactorised(Brownian):
+    visualise_paths = staticmethod(partial(illustrations.visualise_circle_sample_paths_f_factorised, n=1))
+
+    def __init__(self, key, butterfly_a: str, butterfly_b: str, displacement: bool, variance: float, gamma: float, every: int, n: int) -> None:
+        self.key = key
+
+        self.y0 = np.load(butterfly_a)[::every]
+        self.yT = np.load(butterfly_b)[::every]
+
+        self.displacement = displacement
+
+        self.c = 0
+        self.n = n
+
+        def kernel(x, y):
+            return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
+
+        def pairwise(f, xs):
+            return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
+
+        k = pairwise(kernel, self.y0)
+
+        self.dp = process.brownian_motion(k)
+
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=jnp.zeros_like(y0) if self.displacement else y0, key=key))
+
+    def __len__(self) -> int:
+        return self.n
 
     def __getitem__(self, index):
         if index < 0 or index >= len(self):
