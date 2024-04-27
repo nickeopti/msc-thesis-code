@@ -43,11 +43,10 @@ def main():
     else:
         key, subkey = jax.random.split(key)
 
-        model = model_initialiser(experiment.dp, learning_rate=1e-3)
+        model = model_initialiser(dp=experiment.dp, learning_rate=1e-3)
 
         logger = loggers.CSVLogger(name=experiment.__class__.__name__)
 
-        # t = trainer.Trainer(1500, logger=logger)
         t = selector.add_arguments(parser, 'trainer', trainer.Trainer)(logger=logger)
         state = t.fit(
             subkey,
