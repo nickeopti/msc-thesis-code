@@ -31,6 +31,46 @@ def brownian_motion(covariance: jax.Array) -> Diffusion:
     )
 
 
+def kunita_flow_tall(d: int, variance: float, gamma: float) -> Diffusion:
+    def kernel(x, y):
+        return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
+
+    def pairwise(f, xs):
+        return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
+
+    def diffusion(y):
+        a = pairwise(kernel, jnp.vstack((y[:d], y[d:])).T)
+        return jnp.vstack(
+            (
+                jnp.hstack((a, jnp.zeros((d, d)))),
+                jnp.hstack((jnp.zeros((d, d)), a))
+            )
+        )
+
+    def divergence(y):
+        a = (
+            variance / gamma *
+            jax.vmap(
+                lambda x_i: (
+                    jnp.sum(
+                        jax.vmap(
+                            lambda x_j: (x_i - x_j) * jnp.exp(-jnp.linalg.norm(x_i - x_j)**2 / gamma / 2)
+                        )(jnp.vstack((y[:d], y[d:])).T)
+                    )
+                )
+            )(jnp.vstack((y[:d], y[d:])).T)
+        )
+        return jnp.hstack((a, a))
+
+    return Diffusion(
+        d=2 * d,
+        drift=lambda t, y: jnp.zeros(2 * d),
+        diffusion=lambda t, y: diffusion(y),
+        inverse_diffusion=lambda t, y: jnp.linalg.inv(diffusion(y)),
+        diffusion_divergence=lambda t, y: divergence(y),
+    )
+
+
 def kunita_flow(d: int, variance: float, gamma: float) -> Diffusion:
     def kernel(x, y):
         return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
@@ -56,5 +96,5 @@ def kunita_flow(d: int, variance: float, gamma: float) -> Diffusion:
                     )
                 )(y)
             )
-        )
+        ),
     )

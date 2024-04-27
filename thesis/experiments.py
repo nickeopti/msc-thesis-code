@@ -569,17 +569,23 @@ class BrownianStationaryKernelBallLandmarks3DFactorised(Brownian):
         return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
 
 
+class KunitaKernelCircleLandmarks(BrownianCircleLandmarks):
+    def __init__(self, key, k: int, radius: float, radius_T: float, displacement: bool, variance: float, gamma: float, n: int) -> None:
+        super().__init__(key, k, radius, radius_T, displacement, variance, n)
+
+        self.dp = process.kunita_flow_tall(k, variance, gamma)
+
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=jnp.zeros_like(y0) if self.displacement else y0, key=key))
+
+
 class KunitaKernelCircleLandmarksFactorised(BrownianCircleLandmarks):
-    visualise_paths = staticmethod(partial(illustrations.visualise_circle_sample_paths_f_factorised, n=5))
+    visualise_paths = staticmethod(partial(illustrations.visualise_circle_sample_paths_f_factorised, n=1))
 
     def __init__(self, key, k: int, radius: float, radius_T: float, displacement: bool, variance: float, gamma: float, n: int) -> None:
-        super().__init__(key, k, radius, radius_T, variance, n)
-        self.k = k
+        super().__init__(key, k, radius, radius_T, displacement, variance, n)
 
         self.y0 = jnp.hstack((self.y0[:k].reshape(-1, 1), self.y0[k:].reshape(-1, 1)))
         self.yT = jnp.hstack((self.yT[:k].reshape(-1, 1), self.yT[k:].reshape(-1, 1)))
-
-        self.displacement = displacement
 
         self.dp = process.kunita_flow(k, variance, gamma)
 
