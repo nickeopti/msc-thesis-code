@@ -162,7 +162,7 @@ def visualise_circle_sample_paths_f(dp: process.Diffusion, key, filename, n: int
     plt.savefig(filename, dpi=600)
 
 
-def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, score, key, filename, n: int = 5, **kwargs):
+def visualise_circle_sample_paths_f_factorised(dp: process.Diffusion, key, filename, n: int = 5, **kwargs):
     plt.figure()
     import cycler
     plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))

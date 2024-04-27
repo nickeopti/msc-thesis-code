@@ -328,8 +328,7 @@ class BrownianStationaryKernelCircleLandmarks(BrownianCircleLandmarks):
 
 
 class BrownianStationaryKernelCircleLandmarksFactorised(BrownianCircleLandmarks):
-    visualise_paths = None
-    visualise_combination = staticmethod(partial(illustrations.visualise_circle_sample_paths_f_factorised, n=1))
+    visualise_paths = staticmethod(partial(illustrations.visualise_circle_sample_paths_f_factorised, n=1))
 
     def __init__(self, key, k: int, radius: float, radius_T: float, variance: float, n: int) -> None:
         super().__init__(key, k, radius, radius_T, variance, n)
@@ -548,6 +547,41 @@ class BrownianStationaryKernelBallLandmarks3DFactorised(Brownian):
         assert jnp.all(ts_y[:n_y] == ts_z[:n_z])
 
         ys = jnp.dstack((ys_x[:n_x], ys_y[:n_y], ys_z[:n_z]))
+
+        return ts_x[:n_x], ys, self.y0, 0
+
+    @staticmethod
+    def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
+        s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]
+        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
+
+
+class KunitaKernelCircleLandmarksFactorised(BrownianCircleLandmarks):
+    visualise_paths = staticmethod(partial(illustrations.visualise_circle_sample_paths_f_factorised, n=5))
+
+    def __init__(self, key, k: int, radius: float, radius_T: float, variance: float, gamma: float, n: int) -> None:
+        super().__init__(key, k, radius, radius_T, variance, n)
+        self.k = k
+
+        self.y0 = jnp.hstack((self.y0[:k].reshape(-1, 1), self.y0[k:].reshape(-1, 1)))
+        self.yT = jnp.hstack((self.yT[:k].reshape(-1, 1), self.yT[k:].reshape(-1, 1)))
+
+        self.dp = process.kunita_flow(k, variance, gamma)
+
+        self.get_data = jax.jit(lambda y0, key: diffusion.get_data(dp=self.dp, y0=y0, key=key))
+
+    def __getitem__(self, index):
+        if index < 0 or index >= len(self):
+            raise IndexError
+
+        self.key, subkey_x, subkey_y = jax.random.split(self.key, 3)
+        ts_x, ys_x, n_x = self.get_data(y0=self.y0[:, 0], key=subkey_x)
+        ts_y, ys_y, n_y = self.get_data(y0=self.y0[:, 1], key=subkey_y)
+
+        ys = jnp.dstack((ys_x[:n_x], ys_y[:n_y]))
+
+        assert n_x == n_y
+        assert jnp.all(ts_x[:n_x] == ts_y[:n_y])
 
         return ts_x[:n_x], ys, self.y0, 0
 
