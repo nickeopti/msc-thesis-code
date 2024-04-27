@@ -1,7 +1,7 @@
 import abc
 import pathlib
 import typing
-from typing import Generic, Self, TypeVar
+from typing import Any, Generic, Protocol, Self, TypeVar
 
 import jax
 import jax.numpy as jnp
@@ -13,6 +13,12 @@ from flax.training import train_state
 State = TypeVar('State', bound=train_state.TrainState)
 
 
+class Evaluation(Protocol):
+    """https://mypy.readthedocs.io/en/stable/protocols.html#callback-protocols"""
+
+    def __call__(self, state: State, *args: Any) -> jax.Array: ...
+
+
 def _get_class_from_type(cls: Generic[State]) -> State:
     # Pure Python magic; get the concrete class of a generic type
     state_class: State = typing.get_args(cls.__orig_bases__[0])[0]
@@ -21,24 +27,17 @@ def _get_class_from_type(cls: Generic[State]) -> State:
 
 class Module(nn.Module, abc.ABC, Generic[State]):
     @abc.abstractmethod
-    def initialise_params(self, rng):
-        ...
-
-    @staticmethod
-    @abc.abstractmethod
-    def training_step(state: State, *args) -> jax.Array:
-        ...
-
-    @staticmethod
-    def validation_step(state: State, *args) -> jax.Array:
-        ...
-
-    def on_fit_end(self, state: State, log_path: pathlib.Path) -> None:
-        ...
+    def initialise_params(self, rng): ...
 
     @abc.abstractmethod
-    def configure_optimizers(self) -> optax.GradientTransformation:
-        ...
+    def make_training_step(self) -> Evaluation: ...
+
+    def make_validation_step(self) -> Evaluation: ...
+
+    def on_fit_end(self, state: State, log_path: pathlib.Path) -> None: ...
+
+    @abc.abstractmethod
+    def configure_optimizers(self) -> optax.GradientTransformation: ...
 
     @classmethod
     def load_from_checkpoint(cls, path, /, **kwargs) -> tuple[Self, State]:
@@ -69,4 +68,3 @@ class Module(nn.Module, abc.ABC, Generic[State]):
         )
 
         return model, state
-

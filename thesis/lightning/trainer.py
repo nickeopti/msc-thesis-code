@@ -42,6 +42,9 @@ class Trainer:
         with open(self.logger.path / 'arguments.txt', 'x') as f:
             f.write(' '.join(sys.argv))
 
+        training_step = model.make_training_step()
+        validation_step = model.make_validation_step()
+
         print(datetime.datetime.now())
 
         try:
@@ -53,7 +56,7 @@ class Trainer:
                 for batch in tqdm.tqdm(train_data, desc='Training', leave=False):
                     def loss_fn(params):
                         local_state = state.replace(params=params)
-                        return model.training_step(local_state, *batch)
+                        return training_step(local_state, *batch)
 
                     grad_fn = jax.value_and_grad(loss_fn)
                     loss, grad = grad_fn(state.params)
@@ -65,7 +68,7 @@ class Trainer:
 
                 if val_data is not None:
                     for batch in tqdm.tqdm(val_data, desc='Validating', leave=False):
-                        loss = model.validation_step(state, *batch)
+                        loss = validation_step(state, *batch)
 
                         val_loss = val_loss.merge(
                             val_loss.from_model_output(loss)
