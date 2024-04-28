@@ -65,7 +65,7 @@ def get_paths(
     solver = Euler()
     saveat = SaveAt(steps=True)
     # sol = diffeqsolve(terms, solver, t0, t1, dt0=dt, y0=y0, saveat=saveat, max_steps=math.floor(abs((t1 - t0) / dt)) + 1)
-    sol = diffeqsolve(terms, solver, t0, t1, dt0=dt, y0=y0, saveat=saveat, max_steps=max_steps)
+    sol = diffeqsolve(terms, solver, t0, t1, dt0=dt, y0=y0.reshape(-1, order='F'), saveat=saveat, max_steps=max_steps)
 
     n = sol.stats['num_steps']
 

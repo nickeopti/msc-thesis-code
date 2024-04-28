@@ -5,6 +5,10 @@ import jax
 import selector
 
 import thesis.experiments
+import thesis.experiments.constraints
+import thesis.experiments.diffusion_processes
+import thesis.experiments.experiments
+import thesis.experiments.simulators
 import thesis.lightning
 import thesis.models.baseline
 import thesis.processes.process
@@ -12,19 +16,39 @@ from thesis.lightning import loggers, trainer
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
 
-    key = jax.random.PRNGKey(
+    key = jax.random.key(
         selector.get_argument(parser, 'rng_key', type=int, default=0)
     )
     key, subkey = jax.random.split(key)
 
-    experiment = selector.add_options_from_module(
+    constraints = selector.add_options_from_module(
         parser,
-        'process',
-        thesis.experiments,
-        thesis.experiments.Experiment,
-    )(key=subkey)
+        'constraints',
+        thesis.experiments.constraints,
+        thesis.experiments.constraints.Constraints,
+    )
+    diffusion_process = selector.add_options_from_module(
+        parser,
+        'diffusion',
+        thesis.experiments.diffusion_processes,
+        thesis.experiments.diffusion_processes.DiffusionProcess,
+    )
+    simulator = selector.add_options_from_module(
+        parser,
+        'simulator',
+        thesis.experiments.simulators,
+        thesis.experiments.simulators.Simulator,
+    )
+    n = selector.get_argument(parser, 'n', int)
+    experiment = thesis.experiments.experiments.Experiment(
+        key=subkey,
+        constraints=constraints(),
+        diffusion_process=diffusion_process,
+        simulator=simulator,
+        n=n,
+    )
 
     checkpoint = selector.get_argument(parser, 'checkpoint', type=str, default=None)
 
@@ -35,7 +59,7 @@ def main():
     if checkpoint:
         model, state = model_initialiser.func.load_from_checkpoint(
             checkpoint,
-            dp=experiment.dp,
+            dp=experiment.diffusion_process.dp,
             **model_initialiser.keywords,
         )
 
@@ -43,16 +67,18 @@ def main():
     else:
         key, subkey = jax.random.split(key)
 
-        model = model_initialiser(dp=experiment.dp, learning_rate=1e-3)
+        model = model_initialiser(dp=experiment.diffusion_process.dp, learning_rate=1e-3)
 
-        logger = loggers.CSVLogger(name=experiment.__class__.__name__)
+        logger = loggers.CSVLogger(
+            name=f'{experiment.constraints.__class__.__name__}_{experiment.diffusion_process.__class__.__name__}'
+        )
 
         t = selector.add_arguments(parser, 'trainer', trainer.Trainer)(logger=logger)
         state = t.fit(
             subkey,
             model,
             experiment,
-            experiment,
+            # experiment,
         )
 
         path = logger.path

@@ -143,10 +143,10 @@ def visualise_circle_sample_paths_f(dp: process.Diffusion, displacement: jax.Arr
             key=subkey,
             **kwargs
         )
-        ys += displacement
+        ys += displacement.reshape(-1, order='F')
 
         for i in range(k):
-            plt.plot(*ys[:n, [i, k + i]].T, linewidth=1, alpha=0.6, color=f'C{i}')
+            plt.plot(*ys[:n, [i, k + i]].T, linewidth=0.2, alpha=0.8, color=f'C{i}')
             plt.scatter(*ys[n - 1, [i, k + i]], alpha=1, color=f'C{i}', marker='+')
 
         for i in range(k):

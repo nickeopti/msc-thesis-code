@@ -31,6 +31,55 @@ def brownian_motion(covariance: jax.Array) -> Diffusion:
     )
 
 
+def q_process(k: int, d: int, variance: float, gamma: float) -> Diffusion:
+    def kernel(x: jax.Array, y: jax.Array):
+        return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
+
+    def pairwise(f: Callable[[jax.Array, jax.Array], jax.Array], xs):
+        return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
+
+    def diffusion(y: jax.Array):
+        y = y.reshape((-1, d), order='F')
+        # _, d = y.shape
+        a = pairwise(kernel, y)
+        return jnp.vstack(
+            [
+                jnp.hstack(
+                    [
+                        a if i == j else jnp.zeros_like(a)
+                        for j in range(d)
+                    ]
+                )
+                for i in range(d)
+            ]
+        )
+
+    def divergence(y: jax.Array):
+        y = y.reshape((-1, d), order='F')
+        # _, d = y.shape
+        a = (
+            variance / gamma *
+            jax.vmap(
+                lambda x_i: (
+                    jnp.sum(
+                        jax.vmap(
+                            lambda x_j: (x_i - x_j) * jnp.exp(-jnp.linalg.norm(x_i - x_j)**2 / gamma / 2)
+                        )(y)
+                    )
+                )
+            )(y)
+        )
+        return jnp.hstack([a for _ in range(d)])
+
+    return Diffusion(
+        d=k * d,
+        drift=lambda t, y: jnp.zeros_like(y, shape=(y.size,)),
+        diffusion=lambda t, y: diffusion(y),
+        inverse_diffusion=lambda t, y: jnp.linalg.inv(diffusion(y)),
+        diffusion_divergence=lambda t, y: divergence(y),
+    )
+
+
 def kunita_flow_tall(d: int, variance: float, gamma: float) -> Diffusion:
     def kernel(x, y):
         return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)

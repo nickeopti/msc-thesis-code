@@ -41,7 +41,8 @@ class Model(thesis.lightning.Module[State]):
             ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
 
             def loss(p, t, y, y_next, dt):
-                return jnp.linalg.norm(p + self.dp.inverse_diffusion(t, y) @ (y_next - y - self.dp.drift(t, y) * dt) / dt)**2
+                # return jnp.linalg.norm(p + self.dp.inverse_diffusion(t, y) @ (y_next - y - self.dp.drift(t, y) * dt) / dt)**2
+                return p.T @ self.dp.diffusion(t, y) * dt @ p + 2 * p.T @ (y_next - y - self.dp.drift(t, y) * dt)
 
             l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
             return jnp.mean(l)
@@ -54,7 +55,7 @@ class Model(thesis.lightning.Module[State]):
             ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
 
             def loss(p, t, y):
-                psi = -self.dp.inverse_diffusion(t, y) @ (y - v) / t
+                psi = -self.dp.inverse_diffusion(t, y) @ (y - v.reshape(-1, order='F')) / t
                 return jnp.linalg.norm(p - psi)**2
 
             l = jax.vmap(loss)(ps, ts[1:], ys[1:])
@@ -105,8 +106,8 @@ class Factorised(Model):
             def loss(p, t, y, y_next, dt):
                 return jnp.sum(
                     jax.vmap(
-                        lambda p, y, y_next: jnp.linalg.norm(p + self.dp.inverse_diffusion(t, y) @ (y_next - y - self.dp.drift(t, y) * dt) / dt)**2,
-                        # lambda p, y, y_next: p.T @ self.dp.diffusion(t, y) @ p + 2 * p.T @ (y_next - y - self.dp.drift(t, y) * dt),
+                        # lambda p, y, y_next: jnp.linalg.norm(p + self.dp.inverse_diffusion(t, y) @ (y_next - y - self.dp.drift(t, y) * dt) / dt)**2,
+                        lambda p, y, y_next: p.T @ self.dp.diffusion(t, y) * dt @ p + 2 * p.T @ (y_next - y - self.dp.drift(t, y) * dt),
                         in_axes=(1, 1, 1),
                     )(p, y, y_next)
                 )
