@@ -1,3 +1,4 @@
+import csv
 from functools import partial
 from typing import Callable, Optional
 
@@ -19,7 +20,7 @@ class Constraints:
     visualise_paths: Optional[PathsVisualiser] = None
     visualise_field: Optional[FieldVisualiser] = None
 
-    def __init__(self, initial, terminal) -> None:
+    def __init__(self, initial: jax.Array, terminal: jax.Array) -> None:
         self.initial = initial
         self.terminal = terminal
 
@@ -137,5 +138,31 @@ class ButterflyLandmarks(LandmarksConstraints):
     def __init__(self, initial_butterfly: str, terminal_butterfly: str, every: int = 1) -> None:
         initial: np.ndarray = np.load(initial_butterfly)[::every]
         terminal: np.ndarray = np.load(terminal_butterfly)[::every]
+
+        super().__init__(initial, terminal)
+
+
+class SkullLandmarks(LandmarksConstraints):
+    def __init__(self, landmarks_info: str, initial_skull: str, terminal_skull: str, bone: str, every: int = 1) -> None:
+        with open(landmarks_info) as csv_file:
+            reader = csv.DictReader(csv_file)
+            info = [row for row in reader]
+
+        info = {row['id']: row for row in info}
+
+        def extract_landmarks(path):
+            with open(path) as csv_file:
+                reader = csv.DictReader(csv_file)
+                data = [{'id': row['id'], 'x': float(row['X']), 'y': float(row['Y']), 'z': float(row['Z'])} for row in reader]
+
+            return jnp.array(
+                [
+                    (row['x'], row['y'], row['z'])
+                    for row in [row for row in data if info[row['id']][bone] == 'x'][::every]
+                ]
+            )
+
+        initial = extract_landmarks(initial_skull)
+        terminal = extract_landmarks(terminal_skull)
 
         super().__init__(initial, terminal)
