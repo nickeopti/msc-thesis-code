@@ -33,13 +33,12 @@ y_n = ys[n]
 
 
 backwards = process.Diffusion(
-    d=1,
     drift=lambda t, y: y / t,
-    diffusion=jnp.ones((1, 1)),
-    inverse_diffusion=jnp.ones((1, 1)),
-    diffusion_divergence=jnp.zeros((1, 1))
+    diffusion=original.diffusion,
+    inverse_diffusion=original.inverse_diffusion,
+    diffusion_divergence=original.diffusion_divergence,
 )
-ts, ys, n = diffusion.get_paths(
+ts, ys, n = diffusion.get_data(
     dp=backwards,
     y0=y_n,
     key=key,
@@ -59,13 +58,12 @@ with open('perspectives/values.csv', 'a') as f:
 
 
 forwards = process.Diffusion(
-    d=1,
     drift=lambda t, y: -y / (1 - t),
-    diffusion=jnp.ones((1, 1)),
-    inverse_diffusion=jnp.ones((1, 1)),
-    diffusion_divergence=jnp.zeros((1, 1))
+    diffusion=original.diffusion,
+    inverse_diffusion=original.inverse_diffusion,
+    diffusion_divergence=original.diffusion_divergence,
 )
-ts, ys, n = diffusion.get_paths(
+ts, ys, n = diffusion.get_data(
     dp=forwards,
     y0=y_n,
     key=key,

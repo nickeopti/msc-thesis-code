@@ -1,5 +1,6 @@
 import argparse
 import pathlib
+from functools import partial
 
 import jax
 import selector
@@ -15,6 +16,13 @@ import thesis.processes.process
 from thesis.lightning import loggers, trainer
 
 
+def _provide_constraints(diffusion_process: partial, constraints: thesis.experiments.constraints.Constraints):
+    if 'constraints' in diffusion_process.func.__init__.__code__.co_varnames[:diffusion_process.func.__init__.__code__.co_argcount]:
+        return diffusion_process(constraints=constraints)
+    else:
+        return diffusion_process()
+
+
 def main():
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
@@ -28,26 +36,31 @@ def main():
         'constraints',
         thesis.experiments.constraints,
         thesis.experiments.constraints.Constraints,
-    )
-    diffusion_process = selector.add_options_from_module(
-        parser,
-        'diffusion',
-        thesis.experiments.diffusion_processes,
-        thesis.experiments.diffusion_processes.DiffusionProcess,
+    )()
+    diffusion_process = _provide_constraints(
+        selector.add_options_from_module(
+            parser,
+            'diffusion',
+            thesis.experiments.diffusion_processes,
+            thesis.experiments.diffusion_processes.DiffusionProcess,
+        ),
+        constraints=constraints,
     )
     simulator = selector.add_options_from_module(
         parser,
         'simulator',
         thesis.experiments.simulators,
         thesis.experiments.simulators.Simulator,
-    )
-    n = selector.get_argument(parser, 'n', int)
-    experiment = thesis.experiments.experiments.Experiment(
+    )()
+    experiment = selector.add_arguments(
+        parser,
+        'experiment',
+        thesis.experiments.experiments.Experiment
+    )(
         key=subkey,
-        constraints=constraints(),
+        constraints=constraints,
         diffusion_process=diffusion_process,
         simulator=simulator,
-        n=n,
     )
 
     checkpoint = selector.get_argument(parser, 'checkpoint', type=str, default=None)
@@ -60,6 +73,7 @@ def main():
         model, state = model_initialiser.func.load_from_checkpoint(
             checkpoint,
             dp=experiment.diffusion_process.dp,
+            dim=experiment.constraints.initial.shape[0],
             **model_initialiser.keywords,
         )
 
@@ -67,7 +81,10 @@ def main():
     else:
         key, subkey = jax.random.split(key)
 
-        model = model_initialiser(dp=experiment.diffusion_process.dp, learning_rate=1e-3)
+        model = model_initialiser(
+            dp=experiment.diffusion_process.dp,
+            dim=experiment.constraints.initial.shape[0],
+        )
 
         logger = loggers.CSVLogger(
             name=f'{experiment.constraints.__class__.__name__}_{experiment.diffusion_process.__class__.__name__}'

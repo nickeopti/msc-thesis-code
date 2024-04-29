@@ -12,6 +12,7 @@ State = train_state.TrainState
 
 class Model(thesis.lightning.Module[State]):
     dp: process.Diffusion
+    dim: int
     learning_rate: float = 1e-3
 
     @nn.compact
@@ -29,7 +30,7 @@ class Model(thesis.lightning.Module[State]):
                 nn.gelu,
                 nn.Dense(64),
                 nn.gelu,
-                nn.Dense(self.dp.d)
+                nn.Dense(self.dim)
             ]
         )(jnp.hstack((cv[:, None], y)))
 
@@ -64,15 +65,13 @@ class Model(thesis.lightning.Module[State]):
         return validation_step
 
     def initialise_params(self, rng):
-        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d)), 0)
+        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dim)), 0)
 
     def configure_optimizers(self):
         return optax.adam(self.learning_rate)
 
 
 class Factorised(Model):
-    dimensionality: int = 2
-
     @nn.compact
     def __call__(self, t, y, c):
         cv = jnp.ones_like(t) * c
@@ -89,7 +88,7 @@ class Factorised(Model):
                     nn.gelu,
                     nn.Dense(64),
                     nn.gelu,
-                    nn.Dense(self.dp.d),
+                    nn.Dense(self.dim),
                 ]
             )(jnp.hstack((cv[:, None], x))),
             in_axes=2,
@@ -107,9 +106,9 @@ class Factorised(Model):
                 return jnp.sum(
                     jax.vmap(
                         # lambda p, y, y_next: jnp.linalg.norm(p + self.dp.inverse_diffusion(t, y) @ (y_next - y - self.dp.drift(t, y) * dt) / dt)**2,
-                        lambda p, y, y_next: p.T @ self.dp.diffusion(t, y) * dt @ p + 2 * p.T @ (y_next - y - self.dp.drift(t, y) * dt),
-                        in_axes=(1, 1, 1),
-                    )(p, y, y_next)
+                        lambda p, y, y_next, d: p.T @ self.dp.diffusion(t, y) * dt @ p + 2 * p.T @ (y_next - y - d * dt),
+                        in_axes=(1, 1, 1, 1),
+                    )(p, y, y_next, self.dp.drift(t, y))
                 )
 
             l = jax.vmap(loss)(ps, ts[:-1], ys[:-1], ys[1:], ts[1:] - ts[:-1])
@@ -118,4 +117,4 @@ class Factorised(Model):
         return training_step
 
     def initialise_params(self, rng):
-        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dp.d, self.dimensionality)), 0)
+        return self.init(rng, jnp.ones(100), jnp.ones((100, self.dim, 2)), 0)

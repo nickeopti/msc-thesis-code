@@ -1,28 +1,13 @@
 import csv
 from functools import partial
-from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 import thesis.processes.process as process
-from thesis.visualisations import illustrations
-
-PathsVisualiser = Callable
-FieldVisualiser = Callable
-
-
-class Constraints:
-    initial: jax.Array
-    terminal: jax.Array
-
-    visualise_paths: Optional[PathsVisualiser] = None
-    visualise_field: Optional[FieldVisualiser] = None
-
-    def __init__(self, initial: jax.Array, terminal: jax.Array) -> None:
-        self.initial = initial
-        self.terminal = terminal
+from thesis.experiments import Constraints
+from thesis.visualisations import il
 
 
 class PointConstraints(Constraints):
@@ -32,11 +17,11 @@ class PointConstraints(Constraints):
 
         match self.initial.shape:
             case (1,):
-                self.visualise_paths = illustrations.visualise_sample_paths_f_1d
-                self.visualise_field = partial(illustrations.visualise_vector_field_1d, t0=0.1, t1=1)
+                self.visualise_paths = il.visualise_sample_paths_1d
+                self.visualise_field = partial(il.visualise_vector_field_1d, t0=0.1, t1=1)
             case (2,):
-                self.visualise_paths = illustrations.visualise_sample_paths_f
-                self.visualise_field = illustrations.visualise_vector_field
+                self.visualise_paths = il.visualise_sample_paths_2d
+                self.visualise_field = il.visualise_vector_field_2d
 
 
 class PointMixtureConstraints(Constraints):
@@ -50,8 +35,8 @@ class PointMixtureConstraints(Constraints):
         match self.initial.shape:
             # TODO: Consider 1D mixture
             case (2,):
-                self.visualise_paths = illustrations.visualise_sample_paths_f
-                self.visualise_field = illustrations.visualise_vector_field
+                self.visualise_paths = il.visualise_sample_paths_2d
+                self.visualise_field = il.visualise_vector_field_2d
 
     @property
     def initial(self) -> jax.Array:
@@ -78,20 +63,20 @@ class LandmarksConstraints(PointConstraints):
 
         match self.initial.shape:
             case (_, 2):
-                self.visualise_paths = partial(illustrations.visualise_circle_sample_paths_f, n=3)
+                self.visualise_paths = partial(il.visualise_shape_paths_2d, n=1)
             case (_, 3):
-                self.visualise_paths = partial(illustrations.visualise_circle_sample_paths_f_3d, n=1)
+                self.visualise_paths = partial(il.visualise_shape_paths_3d, n=1)
 
 
 class CircleLandmarks(LandmarksConstraints):
     def __init__(self, k: int, initial_radius: float, terminal_radius: float, skewness: float = 1) -> None:
         angles = jnp.linspace(0, 2 * jnp.pi, k, endpoint=False)
 
-        xs = jnp.cos(angles) * initial_radius * skewness
+        xs = jnp.cos(angles) * initial_radius * skewness + 2
         ys = jnp.sin(angles) * initial_radius
         initial = jnp.vstack((xs, ys)).T
 
-        xs_T = jnp.cos(angles) * terminal_radius * skewness
+        xs_T = jnp.cos(angles) * terminal_radius * skewness + 2
         ys_T = jnp.sin(angles) * terminal_radius
         terminal = jnp.vstack((xs_T, ys_T)).T
 
@@ -130,8 +115,6 @@ class BallLandmarks(LandmarksConstraints):
         terminal = points * terminal_radius * jnp.array((1, 1, skewness))
 
         super().__init__(initial, terminal)
-
-        self.visualise_paths = partial(illustrations.visualise_circle_sample_paths_f_factorised_3d_ball, n=1)
 
 
 class ButterflyLandmarks(LandmarksConstraints):

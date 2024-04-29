@@ -1,8 +1,8 @@
 import pathlib
 from functools import partial
+from typing import Callable
 
 import jax
-import jax.numpy as jnp
 from flax.training import train_state
 
 import thesis.processes.process as process
@@ -11,54 +11,81 @@ from thesis.experiments.diffusion_processes import DiffusionProcess
 from thesis.experiments.simulators import Simulator
 
 
+def _f_bar(dp: process.Diffusion, score: Callable[[jax.Array, jax.Array], jax.Array]):
+    def f(t, y):
+        def g(d, s):
+            return d - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
+
+        if len(y.shape) == 1:
+            return g(dp.drift(t, y), score(t, y))
+        else:
+            return jax.vmap(g, in_axes=(1, 1), out_axes=1)(dp.drift(t, y), score(t, y))
+
+    return f
+
+
 class Experiment:
     def __init__(
         self,
         key: jax.dtypes.prng_key,
         constraints: Constraints,
-        diffusion_process: partial,
-        simulator: partial,
+        diffusion_process: DiffusionProcess,
+        simulator: Simulator,
+        displacement: bool,
         n: int,
     ) -> None:
         self.key = key
 
         self.constraints = constraints
+        self.diffusion_process = diffusion_process
+        self.simulator = simulator
 
-        if 'constraints' in diffusion_process.func.__init__.__code__.co_varnames[:diffusion_process.func.__init__.__code__.co_argcount]:
-            self.diffusion_process: DiffusionProcess = diffusion_process(constraints=self.constraints)
-        else:
-            self.diffusion_process: DiffusionProcess = diffusion_process()
-        assert isinstance(self.diffusion_process, DiffusionProcess)
-
-        self.simulator: Simulator = simulator(dp=self.diffusion_process.dp)
-        assert isinstance(self.simulator, Simulator)
-
+        self.displacement = displacement
         self.n = n
 
     def __len__(self) -> int:
         return self.n
-    
+
     def __getitem__(self, index: int) -> jax.Array:
         if index < 0 or index >= len(self):
             raise IndexError
 
         self.key, subkey = jax.random.split(self.key)
-        ts, ys, n = self.simulator.simulate_sample_path(subkey, self.constraints.initial)
+        ts, ys = self.simulator.simulate_sample_path(subkey, self.diffusion_process.dp, self.constraints.initial, 0, 1, 0.01)
+        if self.displacement:
+            ys -= self.constraints.initial.reshape(ys[0].shape, order='F')
 
-        return ts[:n], ys[:n], self.constraints.initial, self.diffusion_process.c
+        return ts, ys, self.constraints.initial, self.diffusion_process.c
     
     def visualise(self, state: train_state.TrainState, plots_path: pathlib.Path):
         self.key, key = jax.random.split(self.key)
 
         if self.constraints.visualise_paths is not None:
-            fs = [(partial(self.diffusion_process.f_bar_learned, dp=self.diffusion_process.dp, state=state, c=self.diffusion_process.c), 'learned')]
-            if hasattr(self.diffusion_process, 'f_bar_analytical'):
+            fs = [
+                (
+                    _f_bar(
+                        self.diffusion_process.dp,
+                        lambda t, y:
+                            self.diffusion_process.score_learned(
+                                t[None],
+                                (y - (self.constraints.initial.reshape(y.shape, order='F') if self.displacement else 0))[None],
+                                state=state,
+                                c=self.diffusion_process.c
+                            )[0]
+                    ),
+                    'learned'
+                )
+            ]
+            if hasattr(self.diffusion_process, 'score_analytical'):
                 fs.append(
                     (
-                        partial(
-                            self.diffusion_process.f_bar_analytical,
-                            dp=self.diffusion_process.dp,
-                            constraints=Constraints(jnp.zeros_like(self.constraints.initial), self.constraints.initial) if self.simulator.displacement else self.constraints,
+                        _f_bar(
+                            self.diffusion_process.dp,
+                            partial(
+                                self.diffusion_process.score_analytical,
+                                dp=self.diffusion_process.dp,
+                                constraints=self.constraints,
+                            )
                         ),
                         'analytical'
                     )
@@ -66,7 +93,6 @@ class Experiment:
 
             for f_bar, name in fs:
                 dp_bar = process.Diffusion(
-                    d=self.diffusion_process.dp.d,
                     drift=f_bar,
                     diffusion=self.diffusion_process.dp.diffusion,
                     inverse_diffusion=None,
@@ -74,29 +100,40 @@ class Experiment:
                 )
 
                 self.constraints.visualise_paths(
-                    dp=dp_bar,
                     key=key,
+                    dp=dp_bar,
+                    simulator=self.simulator,
+                    constraints=self.constraints.reversed(),
                     filename=plots_path / f'{name}_bridge.png',
-                    y0=self.constraints.terminal - (self.constraints.initial if self.simulator.displacement else jnp.zeros_like(self.constraints.initial)),
-                    displacement=self.constraints.initial if self.simulator.displacement else jnp.zeros_like(self.constraints.initial),
-                    t0=1.,
+                    t0=1.0,
                     t1=0.001,
                     dt=-0.001,
                 )
 
             self.constraints.visualise_paths(
-                dp=self.diffusion_process.dp,
                 key=key,
+                dp=self.diffusion_process.dp,
+                simulator=self.simulator,
+                constraints=self.constraints,
                 filename=plots_path / 'unconditional.png',
-                y0=jnp.zeros_like(self.constraints.initial) if self.simulator.displacement else self.constraints.initial,
-                displacement=self.constraints.initial if self.simulator.displacement else jnp.zeros_like(self.constraints.initial),
                 t0=0,
                 t1=1,
                 dt=0.001,
             )
 
         if self.constraints.visualise_field is not None:
-            fs = [(partial(self.diffusion_process.score_learned, state=state, c=self.diffusion_process.c), 'learned')]
+            fs = [
+                (
+                    lambda t, y:
+                        self.diffusion_process.score_learned(
+                            t,
+                            y - (self.constraints.initial.reshape(y.shape, order='F') if self.displacement else 0),
+                            state=state,
+                            c=self.diffusion_process.c
+                        ),
+                    'learned'
+                )
+            ]
             if hasattr(self.diffusion_process, 'score_analytical'):
                 fs.append(
                     (
@@ -104,7 +141,7 @@ class Experiment:
                             partial(
                                 self.diffusion_process.score_analytical,
                                 dp=self.diffusion_process.dp,
-                                constraints=Constraints(jnp.zeros_like(self.constraints.initial), self.constraints.initial) if self.simulator.displacement else self.constraints,
+                                constraints=self.constraints,
                             )
                         ),
                         'analytical'

@@ -24,15 +24,6 @@ class DiffusionProcess:
     def score_learned(t, y, state: train_state.TrainState, c: float):
         return state.apply_fn(state.params, t, y, c=c)
 
-    @staticmethod
-    def f_bar_learned(t, y, dp: process.Diffusion, state: train_state.TrainState, c: float):
-        s = state.apply_fn(state.params, t[None], y.reshape(-1, order='F')[None], c)[0]
-        # s = state.apply_fn(state.params, t[None], y[None], c)[0, :, 0]  # For the wide version
-        # s0 = state.apply_fn(state.params, t[None], jnp.ones_like(y.reshape(-1, order='F')[None]), c)[0]
-        # k = s0.size // 2
-        # jax.debug.print('{v}', v=jnp.max(jnp.abs(s0[:k] - s0[k:])))
-        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
-
 
 class Brownian(DiffusionProcess):
     @staticmethod
@@ -40,14 +31,14 @@ class Brownian(DiffusionProcess):
         if hasattr(constraints, 'score_analytical'):
             return constraints.score_analytical(t, y, dp, constraints)
 
-        y0 = constraints.initial.reshape(-1, order='F')
-        return -dp.inverse_diffusion(t, y) @ (y - y0) / t
+        def g(y, y0):
+            return -dp.inverse_diffusion(t, y) @ (y - y0) / t
 
-    @staticmethod
-    def f_bar_analytical(t, y, dp: process.Diffusion, constraints: Constraints):
-        y0 = constraints.initial.reshape(-1, order='F')
-        s = -dp.inverse_diffusion(t, y) @ (y - y0) / t
-        return dp.drift(t, y) - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
+        if len(y.shape) == 1:
+            y0 = constraints.initial.reshape(-1, order='F')
+            return g(y, y0)
+        else:
+            return jax.vmap(g, in_axes=(1, 1), out_axes=1)(y, constraints.initial)
 
 
 class Brownian1D(Brownian):
@@ -79,7 +70,7 @@ class BrownianWideKernel(Brownian):
         f = partial(kernel, variance=variance, gamma=gamma)
         k = pairwise(f, constraints.initial)
 
-        super().__init__(process.brownian_motion(k), variance)
+        super().__init__(process.wide_brownian_motion(k, constraints.initial.shape[1]), variance)
 
 
 class BrownianLongKernel(Brownian):

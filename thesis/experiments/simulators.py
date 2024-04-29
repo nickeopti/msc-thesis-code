@@ -1,3 +1,5 @@
+from functools import partial, wraps
+
 import jax
 import jax.numpy as jnp
 
@@ -5,63 +7,50 @@ import thesis.processes.diffusion as diffusion
 import thesis.processes.process as process
 
 
-class Simulator:
-    def __init__(self, dp: process.Diffusion, displacement: bool = False) -> None:
-        self.dp = dp
-        self.displacement = displacement
+def _extract(f):
+    @wraps(f)
+    def inner(*args, **kwargs):
+        ts, ys, n = f(*args, **kwargs)
+        return ts[:n], ys[:n]
+    return inner
 
+
+class Simulator:
     @staticmethod
-    def simulate_sample_path(key: jax.dtypes.prng_key, initial: jax.Array):
+    def simulate_sample_path(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, **kwargs):
         raise NotImplementedError
 
 
 class LongSimulator(Simulator):
-    def __init__(self, dp: process.Diffusion, displacement: bool = False) -> None:
-        super().__init__(dp, displacement)
+    def __init__(self) -> None:
+        super().__init__()
 
-        # TODO: Consider constructing a new diffusion
-        # process, suitable for the long format, by
-        # replicating the individual parts of the dp
-        # here, instead of having all the dps doing that.
-        # That could probably make the code even simpler.
-
-        @jax.jit
-        def simulate(key: jax.dtypes.prng_key, initial: jax.Array):
-            if self.displacement:
-                const = initial.reshape(-1, order='F')
-                dp = process.Diffusion(
-                    d=self.dp.d,
-                    drift=lambda t, y: self.dp.drift(t, y + const),
-                    diffusion=lambda t, y: self.dp.diffusion(t, y + const),
-                    inverse_diffusion=lambda t, y: self.dp.inverse_diffusion(t, y + const),
-                    diffusion_divergence=lambda t, y: self.dp.diffusion_divergence(t, y + const),
-                )
-                return diffusion.get_data(
-                    dp=dp,
-                    y0=jnp.zeros_like(initial, shape=(initial.size,)),
-                    key=key,
-                )
-            else:
-                return diffusion.get_data(
-                    dp=self.dp,
-                    y0=initial.reshape(-1, order='F'),
-                    key=key,
-                )
+        @_extract
+        @partial(jax.jit, static_argnames=('dp', 't0', 't1', 'dt'))
+        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, dt):
+            return diffusion.get_data(
+                dp=dp,
+                y0=initial.reshape(-1, order='F'),
+                key=key,
+                t0=t0,
+                t1=t1,
+                dt=dt,
+            )
 
         self.simulate_sample_path = simulate
 
 
 class AutoLongSimulator(Simulator):
-    def __init__(self, dp: process.Diffusion, dim: int, displacement: bool = False) -> None:
-        super().__init__(dp, displacement)
+    def __init__(self) -> None:
+        super().__init__()
 
-        def make_wide(y: jax.Array) -> jax.Array:
+        def make_wide(y: jax.Array, dim) -> jax.Array:
             return y.reshape((-1, dim), order='F')
         
         def make_long(y: jax.Array) -> jax.Array:
             return y.reshape(-1, order='F')
 
-        def long_diffusion(a):
+        def long_diffusion(a, dim):
             return jnp.vstack(
                 [
                     jnp.hstack(
@@ -74,66 +63,25 @@ class AutoLongSimulator(Simulator):
                 ]
             )
 
-        long_dp = process.Diffusion(
-            d=dp.d * dim,
-            drift=lambda t, y: jnp.tile(dp.drift(t, make_wide(y)), dim),
-            diffusion=lambda t, y: long_diffusion(dp.diffusion(t, make_wide(y))),
-            inverse_diffusion=lambda t, y: jnp.linalg.inv(long_diffusion(dp.diffusion(t, make_wide(y)))),
-            diffusion_divergence=lambda t, y: jnp.tile(dp.diffusion_divergence(t, make_long(y)), dim),
-        )
+        def long_dp(dp: process.Diffusion, dim: int):
+            return process.Diffusion(
+                drift=lambda t, y: make_long(dp.drift(t, make_wide(y, dim))),
+                diffusion=lambda t, y: long_diffusion(dp.diffusion(t, make_wide(y, dim)), dim),
+                inverse_diffusion=lambda t, y: jnp.linalg.inv(long_diffusion(dp.diffusion(t, make_wide(y)), dim)),
+                diffusion_divergence=lambda t, y: jnp.tile(dp.diffusion_divergence(t, make_long(y)), dim),
+            )
 
-        # @jax.jit
-        def simulate(key: jax.dtypes.prng_key, initial: jax.Array):
-            print(f'{long_dp.d=}')
-            print(f'{long_dp.drift(0, jnp.zeros(long_dp.d)).shape=}')
-            if self.displacement:
-                return diffusion.get_data(
-                    dp=long_dp,
-                    y0=jnp.zeros_like(initial, shape=(initial.size,)),
-                    key=key,
-                )
-            else:
-                return diffusion.get_data(
-                    dp=long_dp,
-                    y0=make_long(initial),
-                    key=key,
-                )
-
-        self.simulate_sample_path = simulate
-
-
-class WideSimulator(Simulator):
-    def __init__(self, dp: process.Diffusion, displacement: bool = False) -> None:
-        super().__init__(dp, displacement)
-
-        @jax.jit
-        def simulate(key: jax.dtypes.prng_key, initial: jax.Array):
-            _, d = initial.shape
-            keys = jax.random.split(key, d)
-
-            ts, ys, ns = jax.vmap(
-                lambda key, y0: (
-                    diffusion.get_data(
-                        dp=self.dp,
-                        y0=jnp.zeros_like(y0) if self.displacement else y0,
-                        key=key,
-                    )
-                ),
-                in_axes=(0, 1),
-                out_axes=-1,
-            )(keys, initial)
-
-            # for na, nb in zip(ns, ns[1:]):
-            #     assert na == nb
-            # n = na
-            n = ns[0]
-
-            for ta, tb in zip(ts[:n].T, ts[:n].T[1:]):
-                assert jnp.all(ta == tb)
-
-            # for p in r:
-            #     print(f'{p.shape=}')
-
-            return ts[:, 0], ys, n
+        @_extract
+        @partial(jax.jit, static_argnames=('dp', 't0', 't1', 'dt'))
+        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, dt):
+            ts, ys, n = diffusion.get_data(
+                dp=long_dp(dp, initial.shape[1]),
+                y0=make_long(initial),
+                key=key,
+                t0=t0,
+                t1=t1,
+                dt=dt,
+            )
+            return ts, jax.vmap(lambda y: make_wide(y, initial.shape[1]))(ys), n
 
         self.simulate_sample_path = simulate
