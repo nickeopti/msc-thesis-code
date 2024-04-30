@@ -73,7 +73,7 @@ def main():
         model, state = model_initialiser.func.load_from_checkpoint(
             checkpoint,
             dp=experiment.diffusion_process.dp,
-            dim=experiment.constraints.initial.shape[0],
+            dim=experiment[0][1][0].shape[0],
             **model_initialiser.keywords,
         )
 
@@ -83,7 +83,7 @@ def main():
 
         model = model_initialiser(
             dp=experiment.diffusion_process.dp,
-            dim=experiment.constraints.initial.shape[0],
+            dim=experiment[0][1][0].shape[0],
         )
 
         logger = loggers.CSVLogger(
