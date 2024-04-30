@@ -47,6 +47,9 @@ class PointMixtureConstraints(Constraints):
         else:
             return self.initial_b
 
+    def reversed(self):
+        return PointConstraints(initial=self.terminal, terminal=self.initial_b)
+
     @staticmethod
     def score_analytical(t, y, dp: process.Diffusion, constraints: 'PointMixtureConstraints'):
         y0_1 = constraints.initial_a
