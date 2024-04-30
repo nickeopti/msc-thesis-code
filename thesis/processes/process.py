@@ -42,7 +42,7 @@ def wide_brownian_motion(covariance: jax.Array, dim: int) -> Diffusion:
         drift=lambda t, y: jnp.zeros((d, dim)),
         diffusion=lambda t, y: covariance,
         inverse_diffusion=lambda t, y: inverse_covariance,
-        diffusion_divergence=lambda t, y: jnp.zeros(d),
+        diffusion_divergence=lambda t, y: jnp.zeros((d, dim)),
     )
 
 
@@ -95,68 +95,32 @@ def q_process(k: int, d: int, variance: float, gamma: float) -> Diffusion:
     )
 
 
-def kunita_flow_tall(d: int, variance: float, gamma: float) -> Diffusion:
-    def kernel(x, y):
+def kunita_flow(k: int, d: int, variance: float, gamma: float) -> Diffusion:
+    def kernel(x: jax.Array, y: jax.Array):
         return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
 
-    def pairwise(f, xs):
-        return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
+    def pairwise(f: Callable[[jax.Array, jax.Array], jax.Array], xs):
+        return jax.vmap(lambda x: jax.vmap(lambda y: f(x, y))(xs))(xs)
 
-    def diffusion(y):
-        a = pairwise(kernel, jnp.vstack((y[:d], y[d:])).T)
-        return jnp.vstack(
-            (
-                jnp.hstack((a, jnp.zeros((d, d)))),
-                jnp.hstack((jnp.zeros((d, d)), a))
-            )
-        )
-
-    def divergence(y):
-        a = (
+    def divergence(t, y):
+        return (
             variance / gamma *
             jax.vmap(
                 lambda x_i: (
                     jnp.sum(
                         jax.vmap(
                             lambda x_j: (x_i - x_j) * jnp.exp(-jnp.linalg.norm(x_i - x_j)**2 / gamma / 2)
-                        )(jnp.vstack((y[:d], y[d:])).T)
+                        )(y),
+                        axis=0,
+                        keepdims=False,
                     )
                 )
-            )(jnp.vstack((y[:d], y[d:])).T)
+            )(y)
         )
-        return jnp.hstack((a, a))
 
     return Diffusion(
-        drift=lambda t, y: jnp.zeros(2 * d),
-        diffusion=lambda t, y: diffusion(y),
-        inverse_diffusion=lambda t, y: jnp.linalg.inv(diffusion(y)),
-        diffusion_divergence=lambda t, y: divergence(y),
-    )
-
-
-def kunita_flow(d: int, variance: float, gamma: float) -> Diffusion:
-    def kernel(x, y):
-        return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
-
-    def pairwise(f, xs):
-        return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
-
-    return Diffusion(
-        drift=lambda t, y: jnp.zeros(d),
+        drift=lambda t, y: jnp.zeros((k, d)),
         diffusion=lambda t, y: pairwise(kernel, y),
-        inverse_diffusion=lambda t, y: jnp.linalg.inv(pairwise(kernel, y)),
-        diffusion_divergence=(
-            lambda t, y: (
-                variance / gamma *
-                jax.vmap(
-                    lambda x_i: (
-                        jnp.sum(
-                            jax.vmap(
-                                lambda x_j: (x_i - x_j) * jnp.exp(-jnp.linalg.norm(x_i - x_j)**2 / gamma / 2)
-                            )(y)
-                        )
-                    )
-                )(y)
-            )
-        ),
+        inverse_diffusion=lambda t, y: jnp.linalg(pairwise(kernel, y)),
+        diffusion_divergence=divergence,
     )

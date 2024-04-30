@@ -95,9 +95,9 @@ class BrownianLongKernel(Brownian):
         super().__init__(process.brownian_motion(k), variance)
 
 
-class KunitaLongKernel(DiffusionProcess):
-    def __init__(self, k: int, d: int, variance: float, gamma: float) -> None:
-        dp = process.q_process(k, d, variance, gamma)
-        # dp = process.kunita_flow(k, variance, gamma)
+class Kunita(DiffusionProcess):
+    def __init__(self, variance: float, gamma: float, constraints: Constraints) -> None:
+        k, d = constraints.initial.shape
+        dp = process.kunita_flow(k, d, variance, gamma)
 
         super().__init__(dp, variance)
