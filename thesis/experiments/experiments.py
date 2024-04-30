@@ -13,13 +13,13 @@ from thesis.experiments.simulators import Simulator
 
 def _f_bar(dp: process.Diffusion, score: Callable[[jax.Array, jax.Array], jax.Array]):
     def f(t, y):
-        def g(d, s):
-            return d - dp.diffusion(t, y) @ s - dp.diffusion_divergence(t, y)
+        def g(d, s, div):
+            return d - dp.diffusion(t, y) @ s - div
 
         if len(y.shape) == 1:
-            return g(dp.drift(t, y), score(t, y))
+            return g(dp.drift(t, y), score(t, y), dp.diffusion_divergence(t, y))
         else:
-            return jax.vmap(g, in_axes=(1, 1), out_axes=1)(dp.drift(t, y), score(t, y))
+            return jax.vmap(g, in_axes=(1, 1, 1), out_axes=1)(dp.drift(t, y), score(t, y), dp.diffusion_divergence(t, y))
 
     return f
 

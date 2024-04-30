@@ -68,7 +68,7 @@ class AutoLongSimulator(Simulator):
                 drift=lambda t, y: make_long(dp.drift(t, make_wide(y, dim))),
                 diffusion=lambda t, y: long_diffusion(dp.diffusion(t, make_wide(y, dim)), dim),
                 inverse_diffusion=lambda t, y: jnp.linalg.inv(long_diffusion(dp.diffusion(t, make_wide(y)), dim)),
-                diffusion_divergence=lambda t, y: jnp.tile(dp.diffusion_divergence(t, make_long(y)), dim),
+                diffusion_divergence=lambda t, y: make_long(dp.diffusion_divergence(t, make_wide(y, dim))),
             )
 
         @_extract
