@@ -51,11 +51,13 @@ class Experiment:
             raise IndexError
 
         self.key, subkey = jax.random.split(self.key)
-        ts, ys = self.simulator.simulate_sample_path(subkey, self.diffusion_process.dp, self.constraints.initial, 0, 1, 0.01)
-        if self.displacement:
-            ys -= self.constraints.initial.reshape(ys[0].shape, order='F')
+        initial = self.constraints.initial
 
-        return ts, ys, self.constraints.initial, self.diffusion_process.c
+        ts, ys = self.simulator.simulate_sample_path(subkey, self.diffusion_process.dp, initial, 0, 1, 0.01)
+        if self.displacement:
+            ys -= initial.reshape(ys[0].shape, order='F')
+
+        return ts, ys, initial, self.diffusion_process.c
     
     def visualise(self, state: train_state.TrainState, plots_path: pathlib.Path):
         self.key, key = jax.random.split(self.key)
