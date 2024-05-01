@@ -15,8 +15,14 @@ class Constraints:
     visualise_field: Optional[FieldVisualiser] = None
 
     def __init__(self, initial: jax.Array, terminal: jax.Array) -> None:
+        assert initial.shape == terminal.shape
+
         self.initial = initial
         self.terminal = terminal
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self.initial.shape
 
     def reversed(self):
         c = copy.copy(self)
