@@ -65,6 +65,14 @@ class BrownianND(Brownian):
         )
 
 
+class BrownianNDWide(Brownian):
+    def __init__(self, d: int, variance: float) -> None:
+        super().__init__(
+            process.wide_brownian_motion(variance * jnp.identity(d // 2), 2),
+            variance,
+        )
+
+
 class BrownianWideKernel(Brownian):
     def __init__(self, variance: float, gamma: float, constraints: Constraints) -> None:
         f = partial(kernel, variance=variance, gamma=gamma)
