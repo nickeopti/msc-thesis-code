@@ -1,6 +1,6 @@
 import pathlib
 from functools import partial
-from typing import Callable
+from typing import Callable, Optional
 
 import jax
 from flax.training import train_state
@@ -33,6 +33,8 @@ class Experiment:
         simulator: Simulator,
         displacement: bool,
         n: int,
+        min_diffusion_scale: Optional[float] = None,
+        max_diffusion_scale: Optional[float] = None,
     ) -> None:
         self.key = key
 
@@ -42,6 +44,14 @@ class Experiment:
 
         self.displacement = displacement
         self.n = n
+
+        if min_diffusion_scale and max_diffusion_scale:
+            self.diffusion_scale_range = (min_diffusion_scale, max_diffusion_scale)
+            assert self.diffusion_process.c == 1, 'Variance shall be set to 1'
+        elif min_diffusion_scale or max_diffusion_scale:
+            raise ValueError('Either set both or none of {min|max}_diffusion_scale')
+        else:
+            self.diffusion_scale_range = None
 
     def __len__(self) -> int:
         return self.n
@@ -57,8 +67,14 @@ class Experiment:
         if self.displacement:
             ys -= initial.reshape(ys[0].shape, order='F')
 
-        return ts, ys, initial, self.diffusion_process.c
-    
+        if self.diffusion_scale_range is not None:
+            self.key, subkey = jax.random.split(self.key)
+            c = jax.random.uniform(subkey, minval=self.diffusion_scale_range[0], maxval=self.diffusion_scale_range[1])
+        else:
+            c = self.diffusion_process.c
+
+        return ts, ys, initial, c
+
     def visualise(self, state: train_state.TrainState, plots_path: pathlib.Path):
         self.key, key = jax.random.split(self.key)
 

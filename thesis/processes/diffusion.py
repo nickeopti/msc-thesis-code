@@ -29,13 +29,14 @@ def get_data(
     t0: float = 0,
     t1: float = 1,
     dt: float = 0.01,
+    diffusion_scale: float = 1,
     brownian_tree_class: Type[VirtualBrownianTree] = VirtualBrownianTree,
 ):
     d = y0.shape[0]
     brownian_motion = brownian_tree_class(jnp.min(jnp.array([t0, t1])), jnp.max(jnp.array([t0, t1])), tol=1e-3, shape=(d,), key=key)
 
     drift_term = ODETerm(lambda t, y, _: dp.drift(t, y))
-    diffusion_term = ControlTerm(lambda t, y, _: dp.diffusion(t, y), brownian_motion)
+    diffusion_term = ControlTerm(lambda t, y, _: diffusion_scale * dp.diffusion(t, y), brownian_motion)
     terms = MultiTerm(drift_term, diffusion_term)
 
     solver = Euler()

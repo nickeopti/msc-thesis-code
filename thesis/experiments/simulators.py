@@ -27,7 +27,7 @@ class LongSimulator(Simulator):
 
         @_extract
         @partial(jax.jit, static_argnames=('dp', 't0', 't1', 'dt'))
-        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, dt):
+        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, dt, diffusion_scale: float = 1):
             return diffusion.get_data(
                 dp=dp,
                 y0=initial.reshape(-1, order='F'),
@@ -35,6 +35,7 @@ class LongSimulator(Simulator):
                 t0=t0,
                 t1=t1,
                 dt=dt,
+                diffusion_scale=diffusion_scale,
             )
 
         self.simulate_sample_path = simulate
@@ -73,7 +74,7 @@ class AutoLongSimulator(Simulator):
 
         @_extract
         @partial(jax.jit, static_argnames=('dp', 't0', 't1', 'dt'))
-        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, dt):
+        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, dt, diffusion_scale: float = 1):
             ts, ys, n = diffusion.get_data(
                 dp=long_dp(dp, initial.shape[1]),
                 y0=make_long(initial),
@@ -81,6 +82,7 @@ class AutoLongSimulator(Simulator):
                 t0=t0,
                 t1=t1,
                 dt=dt,
+                diffusion_scale=diffusion_scale,
             )
             return ts, jax.vmap(lambda y: make_wide(y, initial.shape[1]))(ys), n
 
