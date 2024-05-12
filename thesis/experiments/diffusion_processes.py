@@ -77,8 +77,9 @@ class BrownianWideKernel(Brownian):
     def __init__(self, variance: float, gamma: float, constraints: Constraints) -> None:
         f = partial(kernel, variance=variance, gamma=gamma)
         k = pairwise(f, constraints.initial)
+        dp = process.wide_brownian_motion(k, constraints.initial.shape[1])
 
-        super().__init__(process.wide_brownian_motion(k, constraints.initial.shape[1]), variance)
+        super().__init__(dp, variance)
 
 
 class BrownianLongKernel(Brownian):
@@ -86,26 +87,23 @@ class BrownianLongKernel(Brownian):
         _, d = constraints.initial.shape
 
         f = partial(kernel, variance=variance, gamma=gamma)
-        a = pairwise(f, constraints.initial)
+        k = pairwise(f, constraints.initial)
+        dp = process.long_dp(process.wide_brownian_motion(k, d), d)
 
-        k = jnp.vstack(
-            [
-                jnp.hstack(
-                    [
-                        a if i == j else jnp.zeros_like(a)
-                        for j in range(d)
-                    ]
-                )
-                for i in range(d)
-            ]
-        )
-
-        super().__init__(process.brownian_motion(k), variance)
+        super().__init__(dp, variance)
 
 
-class Kunita(DiffusionProcess):
+class KunitaWide(DiffusionProcess):
     def __init__(self, variance: float, gamma: float, constraints: Constraints) -> None:
         k, d = constraints.initial.shape
         dp = process.kunita_flow(k, d, variance, gamma)
+
+        super().__init__(dp, variance)
+
+
+class KunitaLong(DiffusionProcess):
+    def __init__(self, variance: float, gamma: float, constraints: Constraints) -> None:
+        k, d = constraints.initial.shape
+        dp = process.long_dp(process.kunita_flow(k, d, variance, gamma), d)
 
         super().__init__(dp, variance)
