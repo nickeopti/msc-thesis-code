@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from thesis.experiments import Constraints, simulators
 from thesis.processes import process
 
-plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab10').colors))
+plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
 
 
 def _plot(f):
@@ -59,6 +59,45 @@ def visualise_sample_paths_2d(key: jax.dtypes.prng_key, dp: process.Diffusion, s
         _, ys = simulator.simulate_sample_path(subkey, dp, constraints.initial, **kwargs)
         plt.plot(*ys.T, linewidth=1, alpha=0.6)
         plt.scatter(*ys[-1], alpha=1)
+
+
+@_plot
+def visualise_sample_paths_2d_wide(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 5, **kwargs):
+    for i in range(n):
+        key, subkey = jax.random.split(key)
+
+        _, ys = simulator.simulate_sample_path(subkey, dp, constraints.initial, **kwargs)
+        ys = ys.reshape((-1, *constraints.initial.shape), order='F')
+
+        for k in range(constraints.initial.shape[0]):
+            plt.plot(*ys[:, k].T, color=f'C{i}', linewidth=0.2, alpha=1)
+            plt.scatter(*ys[-1, k], color=f'C{i}')
+
+    for k in range(constraints.initial.shape[0]):
+        plt.plot(
+            (constraints.initial[k, 0], constraints.terminal[k, 0]),
+            (constraints.initial[k, 1], constraints.terminal[k, 1]),
+            color='black',
+            linestyle='--',
+        )
+
+
+@_plot
+def visualise_mean_sample_path_2d_wide(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 100, **kwargs):
+    def compute_path(key):
+        _, ys = simulator.simulate_sample_path(key, dp, constraints.initial, **kwargs)
+        return ys
+
+    ys = jnp.mean(
+        jax.vmap(compute_path)(jax.random.split(key, n)),
+        axis=0,
+    ).reshape((-1, *constraints.initial.shape), order='F')
+
+    for k in range(constraints.initial.shape[0]):
+        plt.plot(*ys[:, k].T, color='black', linewidth=1, alpha=1)
+        plt.scatter(*ys[-1, k], color='black')
+
+    plt.gca().set_aspect('equal')
 
 
 @_plot
@@ -108,6 +147,9 @@ def visualise_shape_paths_2d(key: jax.dtypes.prng_key, dp: process.Diffusion, si
         plt.plot(_wrap(ys[0, :k]), _wrap(ys[0, k:]), color='black')
         plt.plot(_wrap(ys[-1, :k]), _wrap(ys[-1, k:]), color='black', linestyle='--')
 
+    # plt.plot(_wrap(constraints.terminal[:, 0]), _wrap(constraints.terminal[:, 1]), color='blue', alpha=0.5)
+    plt.gca().set_aspect('equal')
+
 
 @_plot
 def visualise_shape_paths_3d_embedded(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 1, **kwargs):
@@ -132,9 +174,9 @@ def visualise_shape_paths_3d_embedded(key: jax.dtypes.prng_key, dp: process.Diff
 
 @_plot
 def visualise_shape_paths_3d(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 1, **kwargs):
-    ax_initial = plt.subplot(1, 3, 1, projection='3d')
-    ax_terminal = plt.subplot(1, 3, 2, projection='3d', sharex=ax_initial, sharey=ax_initial, sharez=ax_initial)
-    ax_true = plt.subplot(1, 3, 3, projection='3d', sharex=ax_initial, sharey=ax_initial, sharez=ax_initial)
+    ax_initial = plt.subplot(2, 2, 1, projection='3d')
+    ax_terminal = plt.subplot(2, 2, 2, projection='3d', sharex=ax_initial, sharey=ax_initial, sharez=ax_initial)
+    ax_true = plt.subplot(2, 2, 4, projection='3d', sharex=ax_initial, sharey=ax_initial, sharez=ax_initial)
 
     k, d = constraints.initial.shape
 
@@ -145,11 +187,12 @@ def visualise_shape_paths_3d(key: jax.dtypes.prng_key, dp: process.Diffusion, si
         ys = ys.reshape((-1, k * d), order='F')
 
         for i in range(k):
-            ax_initial.scatter(*ys[0, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}')
-            ax_terminal.scatter(*ys[-1, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}')
+            ax_initial.scatter(*ys[0, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', s=1)
+            ax_terminal.scatter(*ys[-1, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', s=1)
     
-    ax_true.scatter(*constraints.terminal.T, alpha=1, color=f'C{i}')
+    ax_true.scatter(*constraints.terminal.T, alpha=1, color=f'C{i}', s=1)
     
     ax_initial.set_aspect('equal')
     ax_terminal.set_aspect('equal')
     ax_true.set_aspect('equal')
+    plt.tight_layout()
