@@ -46,55 +46,6 @@ def wide_brownian_motion(covariance: jax.Array, dim: int) -> Diffusion:
     )
 
 
-def q_process(k: int, d: int, variance: float, gamma: float) -> Diffusion:
-    def kernel(x: jax.Array, y: jax.Array):
-        return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
-
-    def pairwise(f: Callable[[jax.Array, jax.Array], jax.Array], xs):
-        return jax.vmap(lambda x: jax.vmap(f, (0, None))(xs, x))(xs)
-
-    def diffusion(y: jax.Array):
-        y = y.reshape((-1, d), order='F')
-        # _, d = y.shape
-        a = pairwise(kernel, y)
-        return jnp.vstack(
-            [
-                jnp.hstack(
-                    [
-                        a if i == j else jnp.zeros_like(a)
-                        for j in range(d)
-                    ]
-                )
-                for i in range(d)
-            ]
-        )
-
-    def divergence(y: jax.Array):
-        y = y.reshape((-1, d), order='F')
-        # _, d = y.shape
-        a = (
-            variance / gamma *
-            jax.vmap(
-                lambda x_i: (
-                    jnp.sum(
-                        jax.vmap(
-                            lambda x_j: (x_i - x_j) * jnp.exp(-jnp.linalg.norm(x_i - x_j)**2 / gamma / 2)
-                        )(y)
-                    )
-                )
-            )(y)
-        )
-        return jnp.hstack([a for _ in range(d)])
-
-    # TODO: Consider making hashable based on k, d, variance, and gamma
-    return Diffusion(
-        drift=lambda t, y: jnp.zeros_like(y, shape=(y.size,)),
-        diffusion=lambda t, y: diffusion(y),
-        inverse_diffusion=lambda t, y: jnp.linalg.inv(diffusion(y)),
-        diffusion_divergence=lambda t, y: divergence(y),
-    )
-
-
 def kunita_flow(k: int, d: int, variance: float, gamma: float) -> Diffusion:
     def kernel(x: jax.Array, y: jax.Array):
         return variance * jnp.exp(-jnp.linalg.norm(x - y)**2 / gamma / 2)
@@ -123,4 +74,35 @@ def kunita_flow(k: int, d: int, variance: float, gamma: float) -> Diffusion:
         diffusion=lambda t, y: pairwise(kernel, y),
         inverse_diffusion=lambda t, y: jnp.linalg(pairwise(kernel, y)),
         diffusion_divergence=divergence,
+    )
+
+
+def make_wide(y: jax.Array, dim) -> jax.Array:
+    return y.reshape((-1, dim), order='F')
+
+
+def make_long(y: jax.Array) -> jax.Array:
+    return y.reshape(-1, order='F')
+
+
+def long_diffusion(a, dim):
+    return jnp.vstack(
+        [
+            jnp.hstack(
+                [
+                    a if i == j else jnp.zeros_like(a)
+                    for j in range(dim)
+                ]
+            )
+            for i in range(dim)
+        ]
+    )
+
+
+def long_dp(dp: Diffusion, dim: int):
+    return Diffusion(
+        drift=lambda t, y: make_long(dp.drift(t, make_wide(y, dim))),
+        diffusion=lambda t, y: long_diffusion(dp.diffusion(t, make_wide(y, dim)), dim),
+        inverse_diffusion=lambda t, y: jnp.linalg.inv(long_diffusion(dp.diffusion(t, make_wide(y, dim)), dim)),
+        diffusion_divergence=lambda t, y: make_long(dp.diffusion_divergence(t, make_wide(y, dim))),
     )
