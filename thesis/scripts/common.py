@@ -72,7 +72,7 @@ def main():
     if checkpoint:
         model, state = model_initialiser.func.load_from_checkpoint(
             checkpoint,
-            dp=experiment.diffusion_process.dp,
+            dp=experiment.dp,
             dim=experiment[0][1][0].shape[0],
             **model_initialiser.keywords,
         )
@@ -82,7 +82,7 @@ def main():
         key, subkey = jax.random.split(key)
 
         model = model_initialiser(
-            dp=experiment.diffusion_process.dp,
+            dp=experiment.dp,
             dim=experiment[0][1][0].shape[0],
         )
 

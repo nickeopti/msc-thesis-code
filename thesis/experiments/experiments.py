@@ -53,6 +53,10 @@ class Experiment:
         else:
             self.diffusion_scale_range = None
 
+    @property
+    def dp(self) -> process.Diffusion:
+        return self.diffusion_process.dp
+
     def __len__(self) -> int:
         return self.n
 
@@ -63,7 +67,7 @@ class Experiment:
         self.key, subkey = jax.random.split(self.key)
         initial = self.constraints.initial
 
-        ts, ys = self.simulator.simulate_sample_path(subkey, self.diffusion_process.dp, initial, 0, 1, 0.01)
+        ts, ys = self.simulator.simulate_sample_path(subkey, self.dp, initial, 0, 1, 0.01)
         if self.displacement:
             ys -= initial.reshape(ys[0].shape, order='F')
 
@@ -82,7 +86,7 @@ class Experiment:
             fs = [
                 (
                     _f_bar(
-                        self.diffusion_process.dp,
+                        self.dp,
                         lambda t, y:
                             self.diffusion_process.score_learned(
                                 t[None],
@@ -98,10 +102,10 @@ class Experiment:
                 fs.append(
                     (
                         _f_bar(
-                            self.diffusion_process.dp,
+                            self.dp,
                             partial(
                                 self.diffusion_process.score_analytical,
-                                dp=self.diffusion_process.dp,
+                                dp=self.dp,
                                 constraints=self.constraints,
                             )
                         ),
@@ -112,7 +116,7 @@ class Experiment:
             for f_bar, name in fs:
                 dp_bar = process.Diffusion(
                     drift=f_bar,
-                    diffusion=self.diffusion_process.dp.diffusion,
+                    diffusion=self.dp.diffusion,
                     inverse_diffusion=None,
                     diffusion_divergence=None,
                 )
@@ -130,7 +134,7 @@ class Experiment:
 
             self.constraints.visualise_paths(
                 key=key,
-                dp=self.diffusion_process.dp,
+                dp=self.dp,
                 simulator=self.simulator,
                 constraints=self.constraints,
                 filename=plots_path / 'unconditional.png',
@@ -158,7 +162,7 @@ class Experiment:
                         jax.vmap(
                             partial(
                                 self.diffusion_process.score_analytical,
-                                dp=self.diffusion_process.dp,
+                                dp=self.dp,
                                 constraints=self.constraints,
                             )
                         ),
