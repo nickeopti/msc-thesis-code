@@ -24,6 +24,16 @@ class PointConstraints(Constraints):
                 self.visualise_field = il.visualise_vector_field_2d
 
 
+class PointConstraints2D(Constraints):
+    def __init__(self, initial: jax.Array, terminal: jax.Array) -> None:
+        super().__init__(
+            initial.reshape((-1, 2), order='F'),
+            terminal.reshape((-1, 2), order='F')
+        )
+
+        self.visualise_paths = partial(il.visualise_mean_sample_path_2d_wide, n=2000)
+
+
 class PointMixtureConstraints(Constraints):
     def __init__(self, initial_a: jax.Array, initial_b: jax.Array, terminal: jax.Array) -> None:
         self.initial_a = initial_a
@@ -75,11 +85,11 @@ class CircleLandmarks(LandmarksConstraints):
     def __init__(self, k: int, initial_radius: float, terminal_radius: float, skewness: float = 1) -> None:
         angles = jnp.linspace(0, 2 * jnp.pi, k, endpoint=False)
 
-        xs = jnp.cos(angles) * initial_radius * skewness + 2
+        xs = jnp.cos(angles) * initial_radius * skewness
         ys = jnp.sin(angles) * initial_radius
         initial = jnp.vstack((xs, ys)).T
 
-        xs_T = jnp.cos(angles) * terminal_radius * skewness + 2
+        xs_T = jnp.cos(angles) * terminal_radius * skewness
         ys_T = jnp.sin(angles) * terminal_radius
         terminal = jnp.vstack((xs_T, ys_T)).T
 
@@ -112,7 +122,7 @@ class BallLandmarks(LandmarksConstraints):
                 jnp.sin(theta(i)) * jnp.sin(phi(i, n)),
             )
         
-        points = jnp.vstack(tuple(f(i, k) for i in range(k)))
+        points = jnp.vstack(jnp.array([f(i, k) for i in range(k)]))
 
         initial = points * initial_radius * jnp.array((1, 1, skewness))
         terminal = points * terminal_radius * jnp.array((1, 1, skewness))
@@ -148,7 +158,7 @@ class SkullLandmarks(LandmarksConstraints):
                 ]
             )
 
-        initial = extract_landmarks(initial_skull)
-        terminal = extract_landmarks(terminal_skull)
+        initial = extract_landmarks(initial_skull) * 100
+        terminal = extract_landmarks(terminal_skull) * 100
 
         super().__init__(initial, terminal)
