@@ -3,6 +3,7 @@ from functools import partial
 from typing import Callable, Optional
 
 import jax
+import jax.numpy as jnp
 from flax.training import train_state
 
 import thesis.processes.process as process
@@ -60,24 +61,21 @@ class Experiment:
     def __len__(self) -> int:
         return self.n
 
-    def __getitem__(self, index: int) -> jax.Array:
-        if index < 0 or index >= len(self):
-            raise IndexError
-
-        self.key, subkey = jax.random.split(self.key)
+    def __getitem__(self, key: jax.dtypes.prng_key) -> jax.Array:
         initial = self.constraints.initial
 
-        ts, ys = self.simulator.simulate_sample_path(subkey, self.dp, initial, 0, 1, 0.01)
+        subkey1, subkey2 = jax.random.split(key)
+
+        ts, ys = self.simulator.simulate_sample_path(subkey1, self.dp, initial, t0=0, t1=1, n_steps=1000)
         if self.displacement:
             ys -= initial.reshape(ys[0].shape, order='F')
 
         if self.diffusion_scale_range is not None:
-            self.key, subkey = jax.random.split(self.key)
-            c = jax.random.uniform(subkey, minval=self.diffusion_scale_range[0], maxval=self.diffusion_scale_range[1])
+            c = jax.random.uniform(subkey2, minval=self.diffusion_scale_range[0], maxval=self.diffusion_scale_range[1])
         else:
             c = self.diffusion_process.c
 
-        return ts, ys, initial, c
+        return ts, ys, initial, c, (initial.reshape(ys[0].shape, order='F') if self.displacement else 0)
 
     def visualise(self, state: train_state.TrainState, plots_path: pathlib.Path):
         self.key, key = jax.random.split(self.key)
@@ -92,7 +90,7 @@ class Experiment:
                                 t[None],
                                 (y - (self.constraints.initial.reshape(y.shape, order='F') if self.displacement else 0))[None],
                                 state=state,
-                                c=self.diffusion_process.c
+                                c=jnp.array([self.diffusion_process.c])
                             )[0]
                     ),
                     'learned'
@@ -129,7 +127,7 @@ class Experiment:
                     filename=plots_path / f'{name}_bridge.png',
                     t0=1.0,
                     t1=0.001,
-                    dt=-0.001,
+                    n_steps=1000,
                 )
 
             self.constraints.visualise_paths(
@@ -140,7 +138,7 @@ class Experiment:
                 filename=plots_path / 'unconditional.png',
                 t0=0,
                 t1=1,
-                dt=0.001,
+                n_steps=1000,
             )
 
         if self.constraints.visualise_field is not None:
@@ -151,7 +149,7 @@ class Experiment:
                             t,
                             y - (self.constraints.initial.reshape(-1, order='F') if self.displacement else 0),
                             state=state,
-                            c=self.diffusion_process.c
+                            c=jnp.array([self.diffusion_process.c])
                         ),
                     'learned'
                 )

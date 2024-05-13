@@ -1,25 +1,9 @@
-import math
-from typing import Type
-
-import equinox as eqx
 import jax
+import jax.lax
 import jax.numpy as jnp
-from diffrax import (ControlTerm, Euler, MultiTerm, ODETerm, SaveAt,
-                     VirtualBrownianTree, diffeqsolve)
+import jax.random
 
-import thesis.processes.process as process
-
-
-class ReverseVirtualBrownianTree(VirtualBrownianTree):
-    @eqx.filter_jit
-    def evaluate(
-        self,
-        t0,
-        t1=None,
-        left: bool = True,
-        use_levy: bool = False,
-    ):
-        return super().evaluate(1 - t0, 1 - t1, left, use_levy)
+from thesis.processes import process
 
 
 def get_data(
@@ -28,21 +12,23 @@ def get_data(
     key,
     t0: float = 0,
     t1: float = 1,
-    dt: float = 0.01,
+    n_steps: int = 100,
     diffusion_scale: float = 1,
-    brownian_tree_class: Type[VirtualBrownianTree] = VirtualBrownianTree,
 ):
     d = y0.shape[0]
-    brownian_motion = brownian_tree_class(jnp.min(jnp.array([t0, t1])), jnp.max(jnp.array([t0, t1])), tol=1e-3, shape=(d,), key=key)
+    ts = jnp.linspace(t0, t1, n_steps + 1, endpoint=True)
+    wiener_increments = jax.random.normal(key, shape=(n_steps, d))
 
-    drift_term = ODETerm(lambda t, y, _: dp.drift(t, y))
-    diffusion_term = ControlTerm(lambda t, y, _: diffusion_scale * dp.diffusion(t, y), brownian_motion)
-    terms = MultiTerm(drift_term, diffusion_term)
+    def step(y, p):
+        t = p[0]
+        dt = p[1]
+        w = p[2:]
+        y_next = y + dp.drift(t, y) * dt + diffusion_scale * dp.diffusion(t, y) @ (jnp.sqrt(jnp.abs(dt)) * w)
+        return y_next, y_next
 
-    solver = Euler()
-    saveat = SaveAt(steps=True)
-    sol = diffeqsolve(terms, solver, t0, t1, dt0=dt, y0=y0, saveat=saveat, max_steps=math.floor(abs((t1 - t0) / dt)) + 1)
-
-    n = sol.stats['num_steps']
-
-    return sol.ts, sol.ys, n
+    _, ys = jax.lax.scan(
+        f=step,
+        init=y0,
+        xs=jnp.hstack((ts[:-1][:, None], (ts[1:] - ts[:-1])[:, None], wiener_increments))
+    )
+    return ts[1:], ys

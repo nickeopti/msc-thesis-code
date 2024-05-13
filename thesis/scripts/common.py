@@ -3,7 +3,9 @@ import pathlib
 from functools import partial
 
 import jax
+import jax.numpy as jnp
 import selector
+import selector.arguments
 
 import thesis.experiments
 import thesis.experiments.constraints
@@ -14,6 +16,11 @@ import thesis.lightning
 import thesis.models.baseline
 import thesis.processes.process
 from thesis.lightning import loggers, trainer
+
+# jax.config.update('jax_platform_name', 'cpu')
+
+
+selector.arguments.CONVERTER[jax.Array] = partial(jnp.fromstring, sep=',')
 
 
 def _provide_constraints(diffusion_process: partial, constraints: thesis.experiments.constraints.Constraints):
@@ -73,7 +80,7 @@ def main():
         model, state = model_initialiser.func.load_from_checkpoint(
             checkpoint,
             dp=experiment.dp,
-            dim=experiment[0][1][0].shape[0],
+            dim=experiment[jax.random.key(0)][1][0].shape[0],
             **model_initialiser.keywords,
         )
 
@@ -83,7 +90,7 @@ def main():
 
         model = model_initialiser(
             dp=experiment.dp,
-            dim=experiment[0][1][0].shape[0],
+            dim=experiment[jax.random.key(0)][1][0].shape[0],
         )
 
         logger = loggers.CSVLogger(

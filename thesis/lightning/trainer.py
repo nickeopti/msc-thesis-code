@@ -1,6 +1,7 @@
 import datetime
 import itertools
 import sys
+from functools import partial
 
 import clu.metrics
 import jax
@@ -46,6 +47,21 @@ class Trainer:
         validation_step = model.make_validation_step()
 
         print(datetime.datetime.now())
+        key = rng
+
+        @partial(jax.jit, static_argnames=('n',))
+        def compute(key: jax.dtypes.prng_key, state: State, n: int):
+            batch = jax.vmap(train_data.__getitem__)(jax.random.split(key, n))
+
+            def loss_fn(params):
+                local_state = state.replace(params=params)
+                return training_step(local_state, *batch)
+
+            grad_fn = jax.value_and_grad(loss_fn)
+            loss, grad = grad_fn(state.params)
+            state = state.apply_gradients(grads=grad)
+
+            return state, train_loss.from_model_output(loss)
 
         try:
             t = self.counter()
@@ -53,18 +69,10 @@ class Trainer:
                 train_loss = clu.metrics.Average.empty()
                 val_loss = clu.metrics.Average.empty()
 
-                for batch in tqdm.tqdm(train_data, desc='Training', leave=False):
-                    def loss_fn(params):
-                        local_state = state.replace(params=params)
-                        return training_step(local_state, *batch)
+                key, subkey = jax.random.split(key)
 
-                    grad_fn = jax.value_and_grad(loss_fn)
-                    loss, grad = grad_fn(state.params)
-                    state = state.apply_gradients(grads=grad)
-
-                    train_loss = train_loss.merge(
-                        train_loss.from_model_output(loss)
-                    )
+                state, loss = compute(subkey, state, len(train_data))
+                train_loss = train_loss.merge(loss)
 
                 if val_data is not None:
                     for batch in tqdm.tqdm(val_data, desc='Validating', leave=False):

@@ -7,14 +7,6 @@ import thesis.processes.diffusion as diffusion
 import thesis.processes.process as process
 
 
-def _extract(f):
-    @wraps(f)
-    def inner(*args, **kwargs):
-        ts, ys, n = f(*args, **kwargs)
-        return ts[:n], ys[:n]
-    return inner
-
-
 class Simulator:
     @staticmethod
     def simulate_sample_path(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, **kwargs):
@@ -25,16 +17,15 @@ class LongSimulator(Simulator):
     def __init__(self) -> None:
         super().__init__()
 
-        @_extract
-        @partial(jax.jit, static_argnames=('dp', 't0', 't1', 'dt'))
-        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, dt, diffusion_scale: float = 1):
+        @partial(jax.jit, static_argnames=('dp', 'n_steps'))
+        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, n_steps, diffusion_scale: float = 1):
             return diffusion.get_data(
                 dp=dp,
                 y0=initial.reshape(-1, order='F'),
                 key=key,
                 t0=t0,
                 t1=t1,
-                dt=dt,
+                n_steps=n_steps,
                 diffusion_scale=diffusion_scale,
             )
 
@@ -72,18 +63,17 @@ class AutoLongSimulator(Simulator):
                 diffusion_divergence=lambda t, y: make_long(dp.diffusion_divergence(t, make_wide(y, dim))),
             )
 
-        @_extract
-        @partial(jax.jit, static_argnames=('dp', 't0', 't1', 'dt'))
-        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, dt, diffusion_scale: float = 1):
-            ts, ys, n = diffusion.get_data(
+        @partial(jax.jit, static_argnames=('dp', 'n_steps'))
+        def simulate(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, t0, t1, n_steps, diffusion_scale: float = 1):
+            ts, ys = diffusion.get_data(
                 dp=long_dp(dp, initial.shape[1]),
                 y0=make_long(initial),
                 key=key,
                 t0=t0,
                 t1=t1,
-                dt=dt,
+                n_steps=n_steps,
                 diffusion_scale=diffusion_scale,
             )
-            return ts, jax.vmap(lambda y: make_wide(y, initial.shape[1]))(ys), n
+            return ts, jax.vmap(lambda y: make_wide(y, initial.shape[1]))(ys)
 
         self.simulate_sample_path = simulate
