@@ -76,7 +76,7 @@ class LandmarksConstraints(PointConstraints):
 
         match self.initial.shape:
             case (_, 2):
-                self.visualise_paths = partial(il.visualise_shape_paths_2d, n=1)
+                self.visualise_paths = il.multiple(partial(il.visualise_shape_paths_2d, n=1), partial(il.visualise_shape_evolution, n=1))
             case (_, 3):
                 self.visualise_paths = partial(il.visualise_shape_paths_3d, n=1)
 

@@ -1,4 +1,5 @@
 import inspect
+import os.path
 from collections import OrderedDict
 from functools import wraps
 from typing import Callable
@@ -8,6 +9,7 @@ import jax
 import jax.dtypes
 import jax.numpy as jnp
 import jax.random
+import matplotlib
 import matplotlib.pyplot as plt
 
 from thesis.experiments import Constraints, simulators
@@ -32,6 +34,15 @@ def _plot(f):
     sig._parameters = parameters
     inner.__signature__ = sig
     return inner
+
+
+def multiple(*fs):
+    def call_all(*args, **kwargs):
+        name, extension = os.path.splitext(kwargs['filename'])
+        for i, f in enumerate(fs):
+            kwargs['filename'] = f'{name}_{i}{extension}'
+            f(*args, **kwargs)
+    return call_all
 
 
 def _wrap(ys: jax.Array) -> jax.Array:
@@ -149,6 +160,26 @@ def visualise_shape_paths_2d(key: jax.dtypes.prng_key, dp: process.Diffusion, si
 
     # plt.plot(_wrap(constraints.terminal[:, 0]), _wrap(constraints.terminal[:, 1]), color='blue', alpha=0.5)
     plt.gca().set_aspect('equal')
+
+
+@_plot
+def visualise_shape_evolution(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 1, **kwargs):
+    ax = plt.subplot(projection='3d')
+    cm = matplotlib.colormaps['plasma']
+
+    k, d = constraints.initial.shape
+
+    for _ in range(n):
+        key, subkey = jax.random.split(key)
+
+        _, ys = simulator.simulate_sample_path(subkey, dp, constraints.initial, **kwargs)
+        ys = ys.reshape((-1, k * d), order='F')
+
+        for i in range(0, ys.shape[0], 100):
+            ax.plot(_wrap(ys[i, :k]), _wrap(ys[i, k:]), i / ys.shape[0], color=cm(i / ys.shape[0]))
+
+    ax.set_aspect('equalxy')
+    ax.set_zlabel('$t$')
 
 
 @_plot
