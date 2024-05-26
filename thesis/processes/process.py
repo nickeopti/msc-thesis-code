@@ -72,7 +72,7 @@ def kunita_flow(k: int, d: int, variance: float, gamma: float) -> Diffusion:
     return Diffusion(
         drift=lambda t, y: jnp.zeros((k, d)),
         diffusion=lambda t, y: pairwise(kernel, y),
-        inverse_diffusion=lambda t, y: jnp.linalg(pairwise(kernel, y)),
+        inverse_diffusion=lambda t, y: jnp.linalg.inv(pairwise(kernel, y)),
         diffusion_divergence=divergence,
     )
 
