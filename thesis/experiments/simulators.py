@@ -9,7 +9,7 @@ import thesis.processes.process as process
 
 class Simulator:
     @staticmethod
-    def simulate_sample_path(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, **kwargs):
+    def simulate_sample_path(key: jax.dtypes.prng_key, dp: process.Diffusion, initial: jax.Array, **kwargs) -> tuple[jax.Array, jax.Array]:
         raise NotImplementedError
 
 
