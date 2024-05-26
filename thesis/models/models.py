@@ -67,6 +67,22 @@ class Long(lightning.Module[State]):
         return optax.adam(self.learning_rate)
 
 
+class ExactLong(Long):
+    def make_training_step(self):
+        def training_step(state: State, ts, ys, v, c, offset):
+            def predict(ts, ys, cs):
+                return state.apply_fn(state.params, ts, ys, cs)
+            
+            ps = predict(jnp.hstack(ts[:, 1:]), jnp.vstack(ys[:, 1:]), jnp.hstack(jnp.ones_like(ts[:, 1:]) * c[:, None]))
+            dps = jax.vmap(lambda t, y, c: jax.vmap(lambda i: jax.grad(lambda y: predict(t[None], y[None], c[None])[0, i])(y)[i])(jnp.arange(y.size)))(jnp.hstack(ts[:, 1:]), jnp.vstack(ys[:, 1:]), jnp.hstack(jnp.ones_like(ts[:, 1:]) * c[:, None]))
+
+            l = jax.vmap(lambda p, dp: jnp.sum(dp + p**2 / 2))(ps, dps)
+
+            return jnp.mean(l)
+
+        return training_step
+
+
 class Factorised(Long):
     @nn.compact
     def __call__(self, t, y, c):

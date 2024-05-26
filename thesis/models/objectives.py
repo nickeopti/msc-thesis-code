@@ -11,7 +11,8 @@ class Objective(abc.ABC):
 
 
 class Exact(Objective):
-    ...
+    def __call__(self, p, t, y, y_next, dt, drift, diffusion, inverse_diffusion) -> jax.Array:
+        raise ValueError('Use the ExactLong model to use the exact objective')
 
 
 class Denoising(Objective):
