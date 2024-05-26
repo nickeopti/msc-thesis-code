@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import selector
 import selector.arguments
+from flax import linen as nn
 
 import thesis.experiments
 import thesis.experiments.constraints
@@ -13,12 +14,11 @@ import thesis.experiments.diffusion_processes
 import thesis.experiments.experiments
 import thesis.experiments.simulators
 import thesis.lightning
-import thesis.models.baseline
+import thesis.models.models
+import thesis.models.networks
+import thesis.models.objectives
 import thesis.processes.process
 from thesis.lightning import loggers, trainer
-
-# jax.config.update('jax_platform_name', 'cpu')
-
 
 selector.arguments.CONVERTER[jax.Array] = partial(jnp.fromstring, sep=',')
 
@@ -70,12 +70,18 @@ def main():
         simulator=simulator,
     )
 
-    checkpoint = selector.get_argument(parser, 'checkpoint', type=str, default=None)
-
-    model_initialiser = selector.add_options_from_module(
-        parser, 'model', thesis.models.baseline, thesis.lightning.Module,
+    network = selector.add_options_from_module(
+        parser, 'network', thesis.models.networks, thesis.models.networks.Network,
     )
+    objective = selector.add_options_from_module(
+        parser, 'objective', thesis.models.objectives, thesis.models.objectives.Objective,
+    )
+    model_initialiser = selector.add_options_from_module(
+        parser, 'model', thesis.models.models, thesis.lightning.Module,
+    )
+    model_initialiser = partial(model_initialiser, network=partial(network, activation=nn.gelu), objective=objective())
 
+    checkpoint = selector.get_argument(parser, 'checkpoint', type=str, default=None)
     if checkpoint:
         model, state = model_initialiser.func.load_from_checkpoint(
             checkpoint,
@@ -115,35 +121,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-# specify diffusion process
-
-# obtain data set(s), based on the diffusion process
-
-# get model (either train or load checkpoint)
-
-# create visualisations
-
-# possibly compute likelihood
-
-
-
-
-# wiener process is almost surely non-differentiable, and thus taking infinitely small time steps results in something that explodes; hence problems in the disretised paths...
-
-# correlate losses by taking ratio of loss of sequential batches, and learn by the gradient of that
-
-# test whether the likelihood estimates truly are step-size dependent -- convince Stefan of its wrongness
-
-# Idea: all jumps/steps are independent (Markov property); so consider the likelihood of seeing all observations jointly, assuming original covariance structure:
-    # this is not thought trough... But it seems unlikely that all steps will be in the same direction, for instance, assuming a scalar * identity covariance matrix.
-    # So consider the correlation between samples, in some sense.
-
-# Note: There is a difference between taking the sum of the log-likelihoods of each step,
-# and taking the log-likelihood of the sum of all the steps (consider the steps as vectors; their sum is the target).
-# The former is what would be derived from classic high-frequency SDE analysis, and is also what has been done here.
-# The latter _may_ be of interest; it shall certainly be tested! I'm pretty sure it will work in the simple Brownian case,
-# because everything is already Gaussian; the big question is whether it works in general.
