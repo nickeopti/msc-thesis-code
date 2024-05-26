@@ -147,9 +147,9 @@ class Experiment:
                     lambda t, y:
                         self.diffusion_process.score_learned(
                             t,
-                            y - (self.constraints.initial.reshape(-1, order='F') if self.displacement else 0),
+                            y - (self.constraints.initial.reshape(y.shape[1:], order='F') if self.displacement else 0),
                             state=state,
-                            c=jnp.array([self.diffusion_process.c])
+                            c=jnp.ones_like(t) * self.diffusion_process.c
                         ),
                     'learned'
                 )
