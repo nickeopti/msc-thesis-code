@@ -68,18 +68,18 @@ class InverseUNet(Network):
         terminal = min(range(len(layer_sizes)), key=lambda i: layer_sizes[i] <= self.max_hidden_size)
 
         self.up_layers = [(nn.Dense(dim), self.activation) for dim in layer_sizes[initial:terminal]]
-        self.down_layers = [(nn.Dense(dim), self.activation) for dim in layer_sizes[terminal-1:(initial-1 if initial > 0 else None):-1]]
+        self.down_layers = [(nn.Dense(dim), self.activation) for dim in layer_sizes[terminal-2:(initial-1 if initial > 0 else None):-1]]
         self.final_layer = nn.Dense(self.dim)
 
     def __call__(self, x):
         y = x
         up_values = []
-        for layer in self.up_layers:
-            y = nn.gelu(layer(y))
+        for layer, activation in self.up_layers:
+            y = activation(layer(y))
             up_values.append(y)
 
         z = jnp.zeros_like(y)
-        for y, layer in zip(reversed(up_values), self.down_layers):
-            z = nn.gelu(layer(z + y))
+        for y, (layer, activation) in zip(reversed(up_values), self.down_layers):
+            z = activation(layer(z + y))
 
         return self.final_layer(z + up_values[0])
