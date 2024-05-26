@@ -36,6 +36,10 @@ class Module(nn.Module, abc.ABC, Generic[State]):
 
     def on_fit_end(self, state: State, log_path: pathlib.Path) -> None: ...
 
+    @property
+    @abc.abstractmethod
+    def init_params(self) -> Any: ...
+
     @abc.abstractmethod
     def configure_optimizers(self) -> optax.GradientTransformation: ...
 

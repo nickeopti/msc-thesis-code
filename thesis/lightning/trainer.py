@@ -38,6 +38,8 @@ class Trainer:
                 tx=model.configure_optimizers(),
             )
 
+        print(model.tabulate(jax.random.key(0), *model.init_params))
+
         checkpointer = checkpointers.Checkpointer(self.logger.path / 'checkpoints', state)
 
         with open(self.logger.path / 'arguments.txt', 'x') as f:
