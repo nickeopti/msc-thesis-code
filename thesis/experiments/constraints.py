@@ -31,7 +31,12 @@ class PointConstraints2D(Constraints):
             terminal.reshape((-1, 2), order='F')
         )
 
-        self.visualise_paths = partial(il.visualise_mean_sample_path_2d_wide, n=2000)
+        self.visualise_paths = il.multiple(
+            partial(il.visualise_sample_paths_2d_wide, n=1),
+            partial(il.visualise_mean_sample_path_2d_wide, n=10000),
+        )
+        self.visualise_field = partial(il.visualise_vector_field_2d, a=-1, b=1)
+
 
 
 class PointMixtureConstraints(Constraints):
@@ -132,8 +137,8 @@ class BallLandmarks(LandmarksConstraints):
 
 class ButterflyLandmarks(LandmarksConstraints):
     def __init__(self, initial_butterfly: str, terminal_butterfly: str, every: int = 1) -> None:
-        initial: np.ndarray = np.load(initial_butterfly)[::every]
-        terminal: np.ndarray = np.load(terminal_butterfly)[::every]
+        initial: np.ndarray = np.load(initial_butterfly)[::every] * 4
+        terminal: np.ndarray = np.load(terminal_butterfly)[::every] * 4
 
         super().__init__(initial, terminal)
 
