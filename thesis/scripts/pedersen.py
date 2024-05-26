@@ -1,10 +1,12 @@
 import argparse
 from functools import partial
+from typing import Callable
 
 import jax
+import jax.dtypes
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import selector
+from flax import linen as nn
 
 import thesis.experiments
 import thesis.experiments.constraints
@@ -12,15 +14,127 @@ import thesis.experiments.diffusion_processes
 import thesis.experiments.experiments
 import thesis.experiments.simulators
 import thesis.lightning
-import thesis.models.baseline
+import thesis.models.models
+import thesis.models.networks
+import thesis.models.objectives
 import thesis.processes.process
+from thesis.experiments.constraints import Constraints
+from thesis.experiments.simulators import Simulator
+from thesis.processes.process import Diffusion
+from thesis.scripts.common import _provide_constraints
 
 
-def _provide_constraints(diffusion_process: partial, constraints: thesis.experiments.constraints.Constraints):
-    if 'constraints' in diffusion_process.func.__init__.__code__.co_varnames[:diffusion_process.func.__init__.__code__.co_argcount]:
-        return diffusion_process(constraints=constraints)
-    else:
-        return diffusion_process()
+def unconditioned_dp(sigma: float, dp: Diffusion) -> Diffusion:
+    return Diffusion(
+        drift=dp.drift,
+        diffusion=lambda t, y: dp.diffusion(t, y) * jnp.sqrt(sigma),
+        inverse_diffusion=lambda t, y: jnp.linalg.inv(dp.diffusion(t, y) * jnp.sqrt(sigma)),
+        diffusion_divergence=lambda t, y: dp.diffusion_divergence(t, y) * jnp.sqrt(sigma),
+    )
+
+
+def conditioned_dp_forwards(sigma: float, dp: Diffusion, constraints: Constraints, t1: float) -> Diffusion:
+    udp = unconditioned_dp(sigma, dp)
+
+    return Diffusion(
+        drift=lambda t, y: (constraints.terminal - y) / (t1 - t),
+        diffusion=udp.diffusion,
+        inverse_diffusion=udp.inverse_diffusion,
+        diffusion_divergence=udp.diffusion_divergence,
+    )
+
+
+def conditioned_dp_backwards(sigma: float, dp: Diffusion, score: Callable[[Diffusion], Callable[[jax.Array, jax.Array], jax.Array]]) -> Diffusion:
+    udp = unconditioned_dp(sigma, dp)
+
+    return Diffusion(
+        drift=thesis.experiments.experiments._f_bar(dp=udp, score=score(udp)),
+        diffusion=udp.diffusion,
+        inverse_diffusion=udp.inverse_diffusion,
+        diffusion_divergence=udp.diffusion_divergence
+    )
+
+
+def analytical(sigma: float, t1: float, constraints: Constraints):
+    return jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), constraints.initial.reshape(-1, order='F'), sigma * t1)
+
+
+def pedersen(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, simulator: Simulator, M: int, N: int):
+    delta = t1 / N
+    var = delta
+
+    def f(key):
+        ts, ys = simulator.simulate_sample_path(key, dp, constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
+        return jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), ys[-1].reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, 2) * var)
+
+    return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
+
+
+def pedersen_brownian_bridge(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, dp_bar: Diffusion, simulator: Simulator, M: int, N: int):
+    delta = t1 / N
+    var = delta
+
+    def f(key):
+        ts, ys = simulator.simulate_sample_path(key, dp_bar, constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
+        ts = jnp.hstack((0, ts))
+        ys = jnp.vstack((constraints.initial[None], ys))
+        
+        w = jnp.exp(
+            jnp.sum(
+                jax.vmap(
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F')) / 2,
+                    in_axes=(0, 0, 0)
+                )(ts[:-1], ys[:-1], ys[1:])
+            )
+            -
+            jnp.sum(
+                jax.vmap(
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
+                    in_axes=(0, 0, 0)
+                )(ts[:-1], ys[:-1], ys[1:])
+            )
+        )
+        x = ys[-1]
+
+        return {
+            'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), x.reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, 2) * var).squeeze(),
+            'b': w
+        }
+    
+    return jax.scipy.special.logsumexp(**jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
+
+
+def pedersen_brownian_bridge_reverse(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, dp_bar: Diffusion, simulator: Simulator, M: int, N: int):
+    delta = t1 / N
+    var = delta
+
+    def f(key):
+        ts, ys = simulator.simulate_sample_path(key, dp_bar, constraints.terminal, t0=t1, t1=delta, n_steps=N)
+        ts = jnp.hstack((t1, ts))
+        ys = jnp.vstack((constraints.terminal[None], ys))
+        
+        w = jnp.exp(
+            jnp.sum(
+                jax.vmap(
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F')) / 2,
+                    in_axes=(0, 0, 0)
+                )(ts[:-1], ys[:-1], ys[1:])
+            )
+            -
+            jnp.sum(
+                jax.vmap(
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
+                    in_axes=(0, 0, 0)
+                )(ts[:-1], ys[:-1], ys[1:])
+            )
+        )
+        x = ys[-1]
+        return {
+            'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.initial.reshape(-1, order='F'), x.reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, 2) * var).squeeze(),
+            'b': w
+        }
+
+    return jax.scipy.special.logsumexp(**jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
 
 
 def main():
@@ -36,8 +150,6 @@ def main():
         thesis.experiments.constraints,
         thesis.experiments.constraints.Constraints,
     )()
-    # constraints.initial = constraints.initial.reshape((-1, 2), order='F')
-    # constraints.terminal = constraints.terminal.reshape((-1, 2), order='F')
     diffusion_process: thesis.experiments.diffusion_processes.Brownian = _provide_constraints(
         selector.add_options_from_module(
             parser,
@@ -57,9 +169,16 @@ def main():
 
     checkpoint = selector.get_argument(parser, 'checkpoint', type=str, default=None)
     if checkpoint is not None:
-        model_initialiser = selector.add_options_from_module(
-            parser, 'model', thesis.models.baseline, thesis.lightning.Module,
+        network = selector.add_options_from_module(
+            parser, 'network', thesis.models.networks, thesis.models.networks.Network,
         )
+        objective = selector.add_options_from_module(
+            parser, 'objective', thesis.models.objectives, thesis.models.objectives.Objective,
+        )
+        model_initialiser = selector.add_options_from_module(
+            parser, 'model', thesis.models.models, thesis.lightning.Module,
+        )
+        model_initialiser = partial(model_initialiser, network=partial(network, activation=nn.gelu), objective=objective())
         model, state = model_initialiser.func.load_from_checkpoint(
             checkpoint,
             dp=diffusion_process.dp,
@@ -68,201 +187,86 @@ def main():
         )
         displacement = selector.get_argument(parser, 'displacement', type=bool)
 
-    def analytical(sigma, t1, constraints):
-        return jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), constraints.initial.reshape(-1, order='F'), sigma * t1)
 
-    def pedersen(key, sigma, t1, constraints, M, N):
-        delta = t1 / N
-        var = delta
+    filename = 'pedersen.csv'
+    with open(filename, 'w') as f:
+        f.write('method,parameter,ll\n')
 
-        dp = thesis.processes.process.Diffusion(
-            drift=diffusion_process.dp.drift,
-            diffusion=lambda t, y: diffusion_process.dp.diffusion(t, y) * jnp.sqrt(sigma),
-            inverse_diffusion=None,
-            diffusion_divergence=None,
-        )
+    n_mc = selector.get_argument(parser, 'n_mc', type=int, default=10_000)
+    n_s = selector.get_argument(parser, 'n_s', type=int, default=25)
+    k = selector.get_argument(parser, 'n_values', type=int, default=20)
 
-        def f(key):
-            _, ys = simulator.simulate_sample_path(key, dp, constraints.initial, t0=0, t1=t1 * (N-1) / N, dt=delta)
-            x = ys[-1]
-            return jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), x.reshape(-1, order='F'), sigma * var)
+    from_sigma = selector.get_argument(parser, 'from_sigma', type=float)
+    to_sigma = selector.get_argument(parser, 'to_sigma', type=float)
+    log_scale = selector.get_argument(parser, 'log_scale', type=bool, default=False)
 
-        return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
+    sigmas = 10**jnp.linspace(from_sigma, to_sigma, k) if log_scale else jnp.linspace(from_sigma, to_sigma, k)
 
-    def pedersen_brownian_bridge(key, sigma, t1, constraints, M, N):
-        delta = t1 / N
-        var = delta
+    dp = diffusion_process.dp
 
-        dp_bar = thesis.processes.process.Diffusion(
-            drift=lambda t, y: (constraints.terminal - y) / (t1 - t),
-            diffusion=lambda t, y: diffusion_process.dp.diffusion(t, y) * jnp.sqrt(sigma),
-            inverse_diffusion=None,
-            diffusion_divergence=None,
-        )
+    # Analytical
+    f = jax.jit(lambda sigma: analytical(sigma=sigma, t1=1, constraints=constraints))
+    lls = [
+        f(sigma) for sigma in sigmas
+    ]
+    with open(filename, 'a') as f:
+        f.writelines(f'analytical,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
-        def f(key):
-            ts, ys = simulator.simulate_sample_path(key, dp_bar, constraints.initial, t0=0, t1=t1 * (N-1) / N, dt=delta)
-            ts = jnp.hstack((0, ts))
-            ys = jnp.vstack((constraints.initial[None], ys))
-            
-            w = jnp.exp(
-                jnp.sum(
-                    jax.vmap(
-                        lambda y, y_next: jax.scipy.stats.multivariate_normal.logpdf(y_next.reshape(-1, order='F'), y.reshape(-1, order='F'), sigma * var),
-                        in_axes=(0, 0)
-                    )(ys[:-1], ys[1:])
-                )
-                -
-                jnp.sum(
-                    jax.vmap(
-                        lambda t, y, y_next: jax.scipy.stats.multivariate_normal.logpdf(y_next.reshape(-1, order='F'), (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F'), sigma * var),
-                        in_axes=(0, 0, 0)
-                    )(ts[:-1], ys[:-1], ys[1:])
-                )
-            )
-            x = ys[-1]
-            return {
-                'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), x.reshape(-1, order='F'), sigma * var).squeeze(),
-                'b': w
-            }
-        
-        return jax.scipy.special.logsumexp(**jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
+    # Pedersen
+    f = jax.jit(lambda key, sigma: pedersen(key=key, t1=1, constraints=constraints, dp=unconditioned_dp(sigma, dp), simulator=simulator, M=n_mc, N=n_s))
+    lls = [
+        f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
+    ]
+    with open(filename, 'a') as f:
+        f.writelines(f'pedersen,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
-    def pedersen_brownian_bridge_reverse(key, sigma, t1, constraints, M, N, analytical: bool = True):
-        delta = t1 / N
-        var = delta
+    # Importance, forwards
+    f = jax.jit(lambda key, sigma: pedersen_brownian_bridge(key=key, t1=1, constraints=constraints, dp=unconditioned_dp(sigma, dp), dp_bar=conditioned_dp_forwards(sigma, dp, constraints, 1), simulator=simulator, M=n_mc, N=n_s))
+    lls = [
+        f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
+    ]
+    with open(filename, 'a') as f:
+        f.writelines(f'pedersen_bridge,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
-        dp = thesis.processes.process.Diffusion(
-            drift=diffusion_process.dp.drift,
-            diffusion=lambda t, y: diffusion_process.dp.diffusion(t, y) * jnp.sqrt(sigma),
-            inverse_diffusion=lambda t, y: jnp.linalg.inv(diffusion_process.dp.diffusion(t, y) * jnp.sqrt(sigma)),
-            diffusion_divergence=diffusion_process.dp.diffusion_divergence,
-        )
+    # Importance, backwards
+    f = jax.jit(lambda key, sigma: pedersen_brownian_bridge_reverse(key=key, t1=1, constraints=constraints, dp=unconditioned_dp(sigma, dp), dp_bar=conditioned_dp_backwards(sigma, dp, lambda udp: partial(diffusion_process.score_analytical, dp=udp, constraints=constraints)), simulator=simulator, M=n_mc, N=n_s))
+    lls = [
+        f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
+    ]
+    with open(filename, 'a') as f:
+        f.writelines(f'pedersen_bridge_reverse,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
-        dp_bar = thesis.processes.process.Diffusion(
-            drift=thesis.experiments.experiments._f_bar(
-                dp=dp,
-                score=(
-                    partial(diffusion_process.score_analytical, dp=dp, constraints=constraints)
-                    if analytical else
-                    lambda t, y:
-                        diffusion_process.score_learned(
-                            t[None],
-                            (y - (constraints.initial.reshape(y.shape, order='F') if displacement else 0))[None],
-                            state=state,
-                            c=sigma
-                        )[0]
-                ),
-            ),
-            diffusion=dp.diffusion,
-            inverse_diffusion=dp.inverse_diffusion,
-            diffusion_divergence=dp.diffusion_divergence
-        )
-
-        def f(key):
-            ts, ys = simulator.simulate_sample_path(key, dp_bar, constraints.terminal, t0=t1, t1=delta, dt=-delta)
-            ts = jnp.hstack((t1, ts))
-            ys = jnp.vstack((constraints.terminal[None], ys))
-            
-            w = jnp.exp(
-                jnp.sum(
-                    jax.vmap(
-                        lambda y, y_next: jax.scipy.stats.multivariate_normal.logpdf(y_next.reshape(-1, order='F'), y.reshape(-1, order='F'), sigma * var),
-                        in_axes=(0, 0)
-                    )(ys[:-1], ys[1:])
-                )
-                -
-                jnp.sum(
-                    jax.vmap(
-                        lambda t, y, y_next: jax.scipy.stats.multivariate_normal.logpdf(y_next.reshape(-1, order='F'), (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'), sigma * var),
-                        in_axes=(0, 0, 0)
-                    )(ts[:-1], ys[:-1], ys[1:])
-                )
-            )
-            x = ys[-1]
-            return {
-                'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.initial.reshape(-1, order='F'), x.reshape(-1, order='F'), sigma * var).squeeze(),
-                'b': w
-            }
-
-        return jax.scipy.special.logsumexp(**jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
-
-    n_mc = 10_000
-
-    # sigmas = 10**jnp.linspace(-3.5, -2.0, 20)
-    # sigmas = jnp.linspace(0.05, 1, 20)
-    sigmas = jnp.linspace(0.5, 2, 20)
-
-    lls = (jax.vmap(
-        partial(
-            analytical,
-            t1=1,
-            constraints=constraints,
-        )
-    ))(sigmas)
-
-    plt.figure()
-    plt.plot(sigmas, lls)
-    plt.savefig('sigma_ll_analytical.png')
-
-    lls = (jax.vmap(
-        partial(
-            pedersen,
-            t1=1,
-            constraints=constraints,
-            M=n_mc,
-            N=25,
-        )
-    ))(jax.random.split(key, 20), sigmas)
-
-    plt.figure()
-    plt.plot(sigmas, lls)
-    plt.savefig('sigma_ll_pedersen.png')
-
-    lls = (jax.vmap(
-        partial(
-            pedersen_brownian_bridge,
-            t1=1,
-            constraints=constraints,
-            M=n_mc,
-            N=25,
-        )
-    ))(jax.random.split(key, 20), sigmas)
-
-    plt.figure()
-    plt.plot(sigmas, lls)
-    plt.savefig('sigma_ll_pedersen_bridge.png')
-
-    lls = (jax.vmap(
-        partial(
-            pedersen_brownian_bridge_reverse,
-            t1=1,
-            constraints=constraints,
-            M=n_mc,
-            N=25,
-            analytical=True,
-        )
-    ))(jax.random.split(key, 20), sigmas)
-
-    plt.figure()
-    plt.plot(sigmas, lls)
-    plt.savefig('sigma_ll_pedersen_bridge_reverse.png')
-
+    # Importance, backwards, learned
     if checkpoint is not None:
-        lls = (jax.vmap(
-            partial(
-                pedersen_brownian_bridge_reverse,
-                t1=1,
-                constraints=constraints,
-                M=n_mc,
-                N=25,
-                analytical=False,
-            )
-        ))(jax.random.split(key, 20), sigmas)
-
-        plt.figure()
-        plt.plot(sigmas, lls)
-        plt.savefig('sigma_ll_pedersen_bridge_reverse_learned.png')
+        f = jax.jit(
+            lambda key, sigma:
+                pedersen_brownian_bridge_reverse(
+                    key=key,
+                    t1=1,
+                    constraints=constraints,
+                    dp=unconditioned_dp(sigma, dp),
+                    dp_bar=conditioned_dp_backwards(
+                        sigma,
+                        dp,
+                        lambda _:
+                            lambda t, y:
+                                diffusion_process.score_learned(
+                                    t[None],
+                                    (y - (constraints.initial.reshape(y.shape, order='F') if displacement else 0))[None],
+                                    state=state,
+                                    c=sigma
+                                )[0]
+                    ),
+                    simulator=simulator,
+                    M=n_mc,
+                    N=n_s
+                )
+        )
+        lls = [
+            f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
+        ]
+        with open(filename, 'a') as f:
+            f.writelines(f'pedersen_bridge_reverse_learned,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
 
 if __name__ == '__main__':
