@@ -81,8 +81,8 @@ def visualise_sample_paths_2d_wide(key: jax.dtypes.prng_key, dp: process.Diffusi
         ys = ys.reshape((-1, *constraints.initial.shape), order='F')
 
         for k in range(constraints.initial.shape[0]):
-            plt.plot(*ys[:, k].T, color=f'C{i}', linewidth=0.2, alpha=1)
-            plt.scatter(*ys[-1, k], color=f'C{i}')
+            plt.plot(*ys[:, k].T, color=f'C{2*k}', linewidth=0.2, alpha=1)
+            plt.scatter(*ys[-1, k], color=f'C{2*k}')
 
     for k in range(constraints.initial.shape[0]):
         plt.plot(
@@ -97,18 +97,23 @@ def visualise_sample_paths_2d_wide(key: jax.dtypes.prng_key, dp: process.Diffusi
 def visualise_mean_sample_path_2d_wide(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 100, **kwargs):
     def compute_path(key):
         _, ys = simulator.simulate_sample_path(key, dp, constraints.initial, **kwargs)
-        return ys
+        return ys.reshape((-1, *constraints.initial.shape), order='F')
 
-    ys = jnp.mean(
-        jax.vmap(compute_path)(jax.random.split(key, n)),
-        axis=0,
-    ).reshape((-1, *constraints.initial.shape), order='F')
+    ys = jax.vmap(compute_path)(jax.random.split(key, n))
+    _, n_steps, *_ = ys.shape
+    ys = ys[jnp.logical_and(ys[:, n_steps // 2, 0, 0] > 0, ys[:, n_steps // 2, 1, 0] < 0)]
+    n_ys, *_ = ys.shape
+    means = jnp.mean(ys, axis=0)
+
+    for i in range(0, n_ys, n_ys // 100):
+        for k in range(constraints.initial.shape[0]):
+            plt.plot(*ys[i, :, k].T, color=f'C{2*k}', linewidth=0.2, alpha=0.2)
 
     for k in range(constraints.initial.shape[0]):
-        plt.plot(*ys[:, k].T, color='black', linewidth=1, alpha=1)
-        plt.scatter(*ys[-1, k], color='black')
+        plt.plot(*means[:, k].T, color='black', linewidth=1, alpha=1)
+        plt.scatter(*means[-1, k], color='black')
 
-    plt.gca().set_aspect('equal')
+    # plt.gca().set_aspect('equal')
 
 
 @_plot
@@ -133,7 +138,13 @@ def visualise_vector_field_2d(score: Callable[[jax.Array, jax.Array], jax.Array]
     xx, yy = jnp.meshgrid(xs, ys)
 
     s = jnp.stack((xx.flatten(), yy.flatten())).T
-    u, v = score(jnp.ones(n**2) / 1., s).T.reshape(2, n, n)
+    # u, v = score(jnp.ones(n**2) / 1., s).T.reshape(2, n, n)
+    u, v = score(jnp.ones(n**2) / 2., jax.vmap(lambda x: jnp.array((x[0], 0.5, x[1], 0)))(s)).T.reshape(4, n, n)[:2]
+    # r = score(jnp.ones(n**2) / 2., jax.vmap(lambda x: jnp.stack((x, jnp.array((0.5, 0)))))(s))
+    # u, v = r[:, 0].T.reshape(2, n, n)
+    # print(r.shape)
+    # print(u.shape)
+    # print(v.shape)
 
     plt.contourf(xx, yy, jnp.sqrt(u**2 + v**2), levels=jnp.linspace(0, val, nv))
     plt.colorbar()
@@ -158,7 +169,7 @@ def visualise_shape_paths_2d(key: jax.dtypes.prng_key, dp: process.Diffusion, si
         plt.plot(_wrap(ys[0, :k]), _wrap(ys[0, k:]), color='black')
         plt.plot(_wrap(ys[-1, :k]), _wrap(ys[-1, k:]), color='black', linestyle='--')
 
-    # plt.plot(_wrap(constraints.terminal[:, 0]), _wrap(constraints.terminal[:, 1]), color='blue', alpha=0.5)
+    plt.plot(_wrap(constraints.terminal[:, 0]), _wrap(constraints.terminal[:, 1]), color='blue', alpha=0.5)
     plt.gca().set_aspect('equal')
 
 
@@ -177,6 +188,8 @@ def visualise_shape_evolution(key: jax.dtypes.prng_key, dp: process.Diffusion, s
 
         for i in range(0, ys.shape[0], 100):
             ax.plot(_wrap(ys[i, :k]), _wrap(ys[i, k:]), i / ys.shape[0], color=cm(i / ys.shape[0]))
+
+    ax.elev = 15  # default 30
 
     ax.set_aspect('equalxy')
     ax.set_zlabel('$t$')
