@@ -2,6 +2,7 @@ import datetime
 import itertools
 import sys
 from functools import partial
+from typing import Callable
 
 import clu.metrics
 import jax
@@ -29,6 +30,7 @@ class Trainer:
         train_data,
         val_data=None,
         state: State = None,
+        callback: tuple[int, Callable[[int, State], None]] = None,
     ) -> State:
         if state is None:
             state_class: State = thesis.lightning._get_class_from_type(model.__class__)
@@ -47,6 +49,9 @@ class Trainer:
 
         training_step = model.make_training_step()
         validation_step = model.make_validation_step()
+
+        if callback is not None:
+            callback_interval, callback_function = callback
 
         print(datetime.datetime.now())
         key = rng
@@ -90,6 +95,10 @@ class Trainer:
                 t.set_postfix(train=tl, val=vl, version=self.logger.version)
 
                 checkpointer.save(epoch, state)
+
+                if callback is not None and epoch % callback_interval == 0:
+                    callback_function(epoch, state)
+
         except KeyboardInterrupt:
             print('Detected keyboard interrupt. Attempting graceful shutdown...')
 

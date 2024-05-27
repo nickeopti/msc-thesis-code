@@ -103,12 +103,19 @@ def main():
             name=f'{experiment.constraints.__class__.__name__}_{experiment.diffusion_process.__class__.__name__}'
         )
 
+        def callback_function(epoch: int, state):
+            plots_path = logger.path / 'plots' / f'epoch_{epoch}'
+            plots_path.mkdir(parents=True, exist_ok=True)
+
+            experiment.visualise(state, plots_path)
+
         t = selector.add_arguments(parser, 'trainer', trainer.Trainer)(logger=logger)
         state = t.fit(
             subkey,
             model,
             experiment,
             # experiment,
+            callback=(5000, callback_function),
         )
 
         path = logger.path
