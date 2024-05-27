@@ -1,9 +1,11 @@
 import csv
+import os.path
 from functools import partial
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 
 import thesis.processes.process as process
 from thesis.experiments import Constraints
@@ -136,9 +138,12 @@ class BallLandmarks(LandmarksConstraints):
 
 
 class ButterflyLandmarks(LandmarksConstraints):
-    def __init__(self, initial_butterfly: str, terminal_butterfly: str, every: int = 1) -> None:
-        initial: np.ndarray = np.load(initial_butterfly)[::every] * 4
-        terminal: np.ndarray = np.load(terminal_butterfly)[::every] * 4
+    def __init__(self, data_path: str, initial_species: str, terminal_species: str, every: int = 1) -> None:
+        metadata = pd.read_csv(os.path.join(data_path, 'metadata.txt'), sep=';')
+        landmarks = pd.read_csv(os.path.join(data_path, 'aligned.txt'), sep=',', header=None)
+
+        initial = jnp.array(landmarks.loc[metadata['species'] == initial_species])[0].reshape((-1, 2))[::every] * 25
+        terminal = jnp.array(landmarks.loc[metadata['species'] == terminal_species])[0].reshape((-1, 2))[::every] * 25
 
         super().__init__(initial, terminal)
 

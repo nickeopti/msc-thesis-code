@@ -16,6 +16,7 @@ dependencies = [
     "numpy",
     "optax",
     "orbax-checkpoint",
+    "pandas",
     "selector@git+https://github.com/nickeopti/selector",
     "tqdm",
 ]
