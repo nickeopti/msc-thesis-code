@@ -89,7 +89,7 @@ def pedersen_brownian_bridge(key: jax.dtypes.prng_key, t1: float, constraints: C
             -
             jnp.sum(
                 jax.vmap(
-                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y) @ dp_bar.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
                     in_axes=(0, 0, 0)
                 )(ts[:-1], ys[:-1], ys[1:])
             )
@@ -123,7 +123,7 @@ def pedersen_brownian_bridge_reverse(key: jax.dtypes.prng_key, t1: float, constr
             -
             jnp.sum(
                 jax.vmap(
-                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y) @ dp_bar.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
                     in_axes=(0, 0, 0)
                 )(ts[:-1], ys[:-1], ys[1:])
             )
