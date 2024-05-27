@@ -63,7 +63,7 @@ class InverseUNet(Network):
     max_hidden_size: int
 
     def setup(self) -> None:
-        layer_sizes = [2**i for i in range(4, 12)]
+        layer_sizes = [2**i for i in range(4, 14)]
         initial = max(range(len(layer_sizes)), key=lambda i: self.dim < layer_sizes[i])
         terminal = min(range(len(layer_sizes)), key=lambda i: layer_sizes[i] <= self.max_hidden_size)
 
