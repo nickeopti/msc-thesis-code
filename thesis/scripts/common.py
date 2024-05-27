@@ -70,6 +70,20 @@ def main():
         simulator=simulator,
     )
 
+    match selector.get_argument(parser, 'activation', type=str, default='gelu'):
+        case 'relu':
+            activation = nn.relu
+        case 'leaky_relu':
+            activation = nn.leaky_relu
+        case 'elu':
+            activation = nn.elu
+        case 'tanh':
+            activation = nn.tanh
+        case 'gelu':
+            activation = nn.gelu
+        case other:
+            raise ValueError(f'Unknown activation function {other!r} asked for')
+
     network = selector.add_options_from_module(
         parser, 'network', thesis.models.networks, thesis.models.networks.Network,
     )
@@ -79,7 +93,7 @@ def main():
     model_initialiser = selector.add_options_from_module(
         parser, 'model', thesis.models.models, thesis.lightning.Module,
     )
-    model_initialiser = partial(model_initialiser, network=partial(network, activation=nn.gelu), objective=objective())
+    model_initialiser = partial(model_initialiser, network=partial(network, activation=activation), objective=objective())
 
     checkpoint = selector.get_argument(parser, 'checkpoint', type=str, default=None)
     if checkpoint:
