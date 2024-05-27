@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from flax.training import train_state
 
 import thesis.processes.process as process
-from thesis.experiments.constraints import Constraints
+from thesis.experiments.constraints import Constraints, PointMixtureConstraints
 from thesis.experiments.diffusion_processes import DiffusionProcess
 from thesis.experiments.simulators import Simulator
 
@@ -62,7 +62,10 @@ class Experiment:
         return self.n
 
     def __getitem__(self, key: jax.dtypes.prng_key) -> jax.Array:
-        initial = self.constraints.initial
+        if isinstance(self.constraints, PointMixtureConstraints):
+            initial = jnp.stack((self.constraints.initial_a, self.constraints.initial_b))[jax.random.bernoulli(key).astype(int)]
+        else:
+            initial = self.constraints.initial
 
         subkey1, subkey2 = jax.random.split(key)
 
