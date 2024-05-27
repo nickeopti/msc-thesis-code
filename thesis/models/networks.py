@@ -48,12 +48,12 @@ class UNet(Network):
         y = x
         down_values = []
         for layer in self.down_layers:
-            y = nn.gelu(layer(y))
+            y = self.activation(layer(y))
             down_values.append(y)
 
         z = jnp.zeros_like(y)
         for y, layer in zip(reversed(down_values), self.up_layers):
-            z = nn.gelu(layer(z + y))
+            z = self.activation(layer(z + y))
 
         return self.final_layer(z + down_values[0])
 
