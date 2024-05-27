@@ -138,8 +138,8 @@ def visualise_vector_field_2d(score: Callable[[jax.Array, jax.Array], jax.Array]
     xx, yy = jnp.meshgrid(xs, ys)
 
     s = jnp.stack((xx.flatten(), yy.flatten())).T
-    # u, v = score(jnp.ones(n**2) / 1., s).T.reshape(2, n, n)
-    u, v = score(jnp.ones(n**2) / 2., jax.vmap(lambda x: jnp.array((x[0], 0.5, x[1], 0)))(s)).T.reshape(4, n, n)[:2]
+    u, v = score(jnp.ones(n**2) / 1., s).T.reshape(2, n, n)
+    # u, v = score(jnp.ones(n**2) / 2., jax.vmap(lambda x: jnp.array((x[0], 0.5, x[1], 0)))(s)).T.reshape(4, n, n)[:2]
     # r = score(jnp.ones(n**2) / 2., jax.vmap(lambda x: jnp.stack((x, jnp.array((0.5, 0)))))(s))
     # u, v = r[:, 0].T.reshape(2, n, n)
     # print(r.shape)
