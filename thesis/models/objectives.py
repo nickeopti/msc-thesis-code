@@ -17,12 +17,12 @@ class Exact(Objective):
 
 class Denoising(Objective):
     def __call__(self, p, t, y, y_next, dt, drift, diffusion, inverse_diffusion) -> jax.Array:
-        return jnp.linalg.norm(p + (inverse_diffusion / dt) @ (y_next - y - drift * dt) / dt)**2
+        return jnp.linalg.norm(p + inverse_diffusion @ (y_next - y - drift * dt) / dt)**2
 
 
 class Heng(Denoising):
     def __call__(self, p, t, y, y_next, dt, drift, diffusion, inverse_diffusion) -> jax.Array:
-        v = p + (inverse_diffusion / dt) @ (y_next - y - drift * dt) / dt
+        v = p + inverse_diffusion @ (y_next - y - drift * dt) / dt
         return v.T @ diffusion @ v
 
 
