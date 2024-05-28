@@ -64,7 +64,7 @@ class Long(lightning.Module[State]):
         return self.init(rng, *self.init_params)
 
     def configure_optimizers(self):
-        return optax.adam(self.learning_rate)
+        return optax.chain(optax.adaptive_grad_clip(2), optax.adam(self.learning_rate))
 
 
 class ExactLong(Long):
