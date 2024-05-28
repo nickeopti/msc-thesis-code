@@ -44,11 +44,12 @@ class Long(lightning.Module[State]):
         return training_step
 
     def make_validation_step(self):
-        def validation_step(state: State, ts, ys, v, c):
-            ps = state.apply_fn(state.params, ts[1:], ys[1:], c)
+        @jax.jit
+        def validation_step(state: State, ts, ys, v, c, offset):
+            ps = state.apply_fn(state.params, ts[1:], ys[1:], jnp.ones_like(ts[1:]) * c)
 
             def loss(p, t, y):
-                psi = -self.dp.inverse_diffusion(t, y) @ (y - v.reshape(-1, order='F')) / t
+                psi = -self.dp.inverse_diffusion(t, y + offset[0]) @ (y - v.reshape(-1, order='F')) / t
                 return jnp.linalg.norm(p - psi)**2
 
             l = jax.vmap(loss)(ps, ts[1:], ys[1:])
