@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from thesis.experiments import Constraints, simulators
 from thesis.processes import process
 
-plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab10').colors))
+plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
 
 
 def _plot(f):
@@ -113,7 +113,11 @@ def visualise_mean_sample_path_2d_wide(key: jax.dtypes.prng_key, dp: process.Dif
         plt.plot(*means[:, k].T, color='black', linewidth=1, alpha=1)
         plt.scatter(*means[-1, k], color='black')
 
-    # plt.gca().set_aspect('equal')
+    plt.gca().set_xlim(-2, 2)
+    plt.gca().set_ylim(-2, 2)
+    plt.gca().set_aspect('equal')
+    plt.axis('off')
+    plt.tight_layout()
 
 
 @_plot
