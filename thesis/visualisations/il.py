@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from thesis.experiments import Constraints, simulators
 from thesis.processes import process
 
-plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab20').colors))
+plt.rc('axes', prop_cycle=cycler.cycler(color=plt.colormaps.get_cmap('tab10').colors))
 
 
 def _plot(f):
@@ -50,7 +50,7 @@ def _wrap(ys: jax.Array) -> jax.Array:
 
 
 @_plot
-def visualise_sample_paths_1d(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 5, **kwargs):
+def visualise_sample_paths_1d(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 10, **kwargs):
     for _ in range(n):
         key, subkey = jax.random.split(key)
 
@@ -233,9 +233,10 @@ def visualise_shape_paths_3d(key: jax.dtypes.prng_key, dp: process.Diffusion, si
         for i in range(k):
             ax_initial.scatter(*ys[0, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', s=1)
             ax_terminal.scatter(*ys[-1, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', s=1)
-    
-    ax_true.scatter(*constraints.terminal.T, alpha=1, color=f'C{i}', s=1)
-    
+
+    for i in range(k):
+        ax_true.scatter(*constraints.terminal[i], alpha=1, color=f'C{i}', s=1)
+
     ax_initial.set_aspect('equal')
     ax_terminal.set_aspect('equal')
     ax_true.set_aspect('equal')
