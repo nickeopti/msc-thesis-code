@@ -176,3 +176,68 @@ class Experiment:
                     score=score,
                     filename=plots_path / f'{name}_score_vector_field.png',
                 )
+
+        if self.constraints.visualise_combination is not None:
+            fs = [
+                (
+                    _f_bar(
+                        self.dp,
+                        lambda t, y:
+                            self.diffusion_process.score_learned(
+                                t[None],
+                                (y - (self.constraints.initial.reshape(y.shape, order='F') if self.displacement else 0))[None],
+                                state=state,
+                                c=jnp.array([self.diffusion_process.c])
+                            )[0]
+                    ),
+                    lambda t, y:
+                        self.diffusion_process.score_learned(
+                            t,
+                            y - (self.constraints.initial.reshape(y.shape[1:], order='F') if self.displacement else 0),
+                            state=state,
+                            c=jnp.ones_like(t) * self.diffusion_process.c
+                        ),
+                    'learned'
+                )
+            ]
+            if hasattr(self.diffusion_process, 'score_analytical'):
+                fs.append(
+                    (
+                        _f_bar(
+                            self.dp,
+                            partial(
+                                self.diffusion_process.score_analytical,
+                                dp=self.dp,
+                                constraints=self.constraints,
+                            )
+                        ),
+                        jax.vmap(
+                            partial(
+                                self.diffusion_process.score_analytical,
+                                dp=self.dp,
+                                constraints=self.constraints,
+                            )
+                        ),
+                        'analytical'
+                    )
+                )
+
+            for f_bar, score, name in fs:
+                dp_bar = process.Diffusion(
+                    drift=f_bar,
+                    diffusion=self.dp.diffusion,
+                    inverse_diffusion=None,
+                    diffusion_divergence=None,
+                )
+
+                self.constraints.visualise_combination(
+                    score=score,
+                    key=key,
+                    dp=dp_bar,
+                    simulator=self.simulator,
+                    constraints=self.constraints.reversed(),
+                    t0=1.0,
+                    t1=0.001,
+                    n_steps=1000,
+                    filename=plots_path / f'{name}_score_vector_field_with_samples.png',
+                )

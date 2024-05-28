@@ -82,7 +82,8 @@ class Trainer:
                 train_loss = train_loss.merge(loss)
 
                 if val_data is not None:
-                    for batch in tqdm.tqdm(val_data, desc='Validating', leave=False):
+                    for subkey in jax.random.split(key, len(val_data)):
+                        batch = val_data[subkey]
                         loss = validation_step(state, *batch)
 
                         val_loss = val_loss.merge(

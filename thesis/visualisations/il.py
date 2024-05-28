@@ -156,6 +156,32 @@ def visualise_vector_field_2d(score: Callable[[jax.Array, jax.Array], jax.Array]
 
 
 @_plot
+def visualise_vector_field_2d_with_sample_paths(
+    score: Callable[[jax.Array, jax.Array], jax.Array],
+    key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n_samples: int = 10,
+    n: int = 20, a: float = -3, b: float = 3, val: float = 5, nv: int = 51,
+    **kwargs
+):
+    xs = jnp.linspace(a, b, n)
+    ys = jnp.linspace(a, b, n)
+    xx, yy = jnp.meshgrid(xs, ys)
+
+    s = jnp.stack((xx.flatten(), yy.flatten())).T
+    u, v = score(jnp.ones(n**2) / 1., s).T.reshape(2, n, n)
+
+    plt.contourf(xx, yy, jnp.sqrt(u**2 + v**2), levels=jnp.linspace(0, val, nv))
+    plt.colorbar()
+    plt.quiver(xs, ys, u, v)
+
+    for _ in range(n_samples):
+        key, subkey = jax.random.split(key)
+
+        _, ys = simulator.simulate_sample_path(subkey, dp, constraints.initial, **kwargs)
+        plt.plot(*ys.T, linewidth=1, alpha=0.6)
+        plt.scatter(*ys[-1], alpha=1)
+
+
+@_plot
 def visualise_shape_paths_2d(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, n: int = 1, **kwargs):
     k, d = constraints.initial.shape
 

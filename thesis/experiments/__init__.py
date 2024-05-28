@@ -13,6 +13,7 @@ class Constraints:
 
     visualise_paths: Optional[PathsVisualiser] = None
     visualise_field: Optional[FieldVisualiser] = None
+    visualise_combination: Optional[Callable] = None
 
     def __init__(self, initial: jax.Array, terminal: jax.Array) -> None:
         assert initial.shape == terminal.shape

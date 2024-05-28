@@ -52,8 +52,9 @@ class PointMixtureConstraints(Constraints):
         match self.initial.shape:
             # TODO: Consider 1D mixture
             case (2,):
-                self.visualise_paths = il.visualise_sample_paths_2d
+                self.visualise_paths = partial(il.visualise_sample_paths_2d, n=10)
                 self.visualise_field = il.visualise_vector_field_2d
+                self.visualise_combination = il.visualise_vector_field_2d_with_sample_paths
 
     @property
     def initial(self) -> jax.Array:

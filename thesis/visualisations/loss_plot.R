@@ -44,8 +44,8 @@ ggsave(
         sep = "/"
     ),
     # paste("plots", paste(args[1], "_", args[2], ".png", sep = ""), sep = "/"),
-    width = 30,
-    height = 16,
+    width = 20,
+    height = 8,
     units = "cm",
     dpi = 600
 )
