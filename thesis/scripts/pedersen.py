@@ -63,9 +63,11 @@ def pedersen(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: 
     delta = t1 / N
     var = delta
 
+    d = constraints.initial.shape[1] if len(constraints.initial.shape) > 1 else 1
+
     def f(key):
         ts, ys = simulator.simulate_sample_path(key, dp, constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
-        return jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), ys[-1].reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, 2) * var)
+        return jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), ys[-1].reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, d) * var)
 
     return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
 
@@ -73,6 +75,8 @@ def pedersen(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: 
 def pedersen_brownian_bridge(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, dp_bar: Diffusion, simulator: Simulator, M: int, N: int):
     delta = t1 / N
     var = delta
+
+    d = constraints.initial.shape[1] if len(constraints.initial.shape) > 1 else 1
 
     def f(key):
         ts, ys = simulator.simulate_sample_path(key, dp_bar, constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
@@ -82,14 +86,14 @@ def pedersen_brownian_bridge(key: jax.dtypes.prng_key, t1: float, constraints: C
         w = jnp.exp(
             jnp.sum(
                 jax.vmap(
-                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F')) / 2,
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, d) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F')) / 2,
                     in_axes=(0, 0, 0)
                 )(ts[:-1], ys[:-1], ys[1:])
             )
             -
             jnp.sum(
                 jax.vmap(
-                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y) @ dp_bar.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y) @ dp_bar.diffusion(t, y).T, d) * var) @ (y_next.reshape(-1, order='F') - (y + delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
                     in_axes=(0, 0, 0)
                 )(ts[:-1], ys[:-1], ys[1:])
             )
@@ -97,7 +101,7 @@ def pedersen_brownian_bridge(key: jax.dtypes.prng_key, t1: float, constraints: C
         x = ys[-1]
 
         return {
-            'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), x.reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, 2) * var).squeeze(),
+            'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), x.reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, d) * var).squeeze(),
             'b': w
         }
     
@@ -108,6 +112,8 @@ def pedersen_brownian_bridge_reverse(key: jax.dtypes.prng_key, t1: float, constr
     delta = t1 / N
     var = delta
 
+    d = constraints.initial.shape[1] if len(constraints.initial.shape) > 1 else 1
+
     def f(key):
         ts, ys = simulator.simulate_sample_path(key, dp_bar, constraints.terminal, t0=t1, t1=delta, n_steps=N)
         ts = jnp.hstack((t1, ts))
@@ -116,21 +122,21 @@ def pedersen_brownian_bridge_reverse(key: jax.dtypes.prng_key, t1: float, constr
         w = jnp.exp(
             jnp.sum(
                 jax.vmap(
-                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F')) / 2,
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y) @ dp.diffusion(t, y).T, d) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F')) / 2,
                     in_axes=(0, 0, 0)
                 )(ts[:-1], ys[:-1], ys[1:])
             )
             -
             jnp.sum(
                 jax.vmap(
-                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y) @ dp_bar.diffusion(t, y).T, 2) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
+                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')).T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y) @ dp_bar.diffusion(t, y).T, d) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F')) / 2,
                     in_axes=(0, 0, 0)
                 )(ts[:-1], ys[:-1], ys[1:])
             )
         )
         x = ys[-1]
         return {
-            'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.initial.reshape(-1, order='F'), x.reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, 2) * var).squeeze(),
+            'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.initial.reshape(-1, order='F'), x.reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]) @ dp.diffusion(ts[-1], ys[-1]).T, d) * var).squeeze(),
             'b': w
         }
 
