@@ -69,14 +69,16 @@ class Experiment:
 
         subkey1, subkey2 = jax.random.split(key)
 
-        ts, ys = self.simulator.simulate_sample_path(subkey1, self.dp, initial, t0=0, t1=1, n_steps=1000)
-        if self.displacement:
-            ys -= initial.reshape(ys[0].shape, order='F')
-
         if self.diffusion_scale_range is not None:
             c = jax.random.uniform(subkey2, minval=self.diffusion_scale_range[0], maxval=self.diffusion_scale_range[1])
+            diffusion_scale = c
         else:
             c = self.diffusion_process.c
+            diffusion_scale = 1
+
+        ts, ys = self.simulator.simulate_sample_path(subkey1, self.dp, initial, t0=0, t1=1, n_steps=1000, diffusion_scale=diffusion_scale)
+        if self.displacement:
+            ys -= initial.reshape(ys[0].shape, order='F')
 
         return ts, ys, initial, c, (initial.reshape(ys[0].shape, order='F') if self.displacement else 0)
 
