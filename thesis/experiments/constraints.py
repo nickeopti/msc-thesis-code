@@ -36,9 +36,8 @@ class PointConstraints2D(Constraints):
         self.visualise_paths = il.multiple(
             partial(il.visualise_sample_paths_2d_wide, n=1),
             partial(il.visualise_mean_sample_path_2d_wide, n=10000),
+            # partial(il.animate_mean_sample_path_2d_wide, n=10000),
         )
-        self.visualise_field = partial(il.visualise_vector_field_2d, a=-1, b=1)
-
 
 
 class PointMixtureConstraints(Constraints):
@@ -143,8 +142,8 @@ class ButterflyLandmarks(LandmarksConstraints):
         metadata = pd.read_csv(os.path.join(data_path, 'metadata.txt'), sep=';')
         landmarks = pd.read_csv(os.path.join(data_path, 'aligned.txt'), sep=',', header=None)
 
-        initial = jnp.array(landmarks.loc[metadata['species'] == initial_species])[0].reshape((-1, 2))[::every] * 25
-        terminal = jnp.array(landmarks.loc[metadata['species'] == terminal_species])[0].reshape((-1, 2))[::every] * 25
+        initial = jnp.array(landmarks.loc[metadata['species'] == initial_species])[0].reshape((-1, 2))[::every] * 50
+        terminal = jnp.array(landmarks.loc[metadata['species'] == terminal_species])[0].reshape((-1, 2))[::every] * 50
 
         super().__init__(initial, terminal)
 
