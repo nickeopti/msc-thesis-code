@@ -7,7 +7,7 @@ library(ggplot2)
 
 args <- commandArgs(trailingOnly = TRUE)
 v_num <- args[2]
-if (length(args) == 1) {
+if (length(args) == 2) {
     cutoff <- 10
 } else {
     cutoff <- strtoi(args[3])
@@ -29,7 +29,6 @@ metrics %>%
     ggplot() +
         aes(x = epoch, y = value) +
         facet_wrap(~loss, scales = "free_y") +
-        # ylim(0, NA) +
         geom_line() +
         geom_smooth() +
         xlab("Epoch") +
