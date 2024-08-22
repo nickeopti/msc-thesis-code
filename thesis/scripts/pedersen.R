@@ -20,6 +20,7 @@ data |>
     aes(x = parameter, y = ll) +
     facet_wrap(~method, scales = 'free_y', labeller = as_labeller(names)) +
     geom_line() +
+    scale_x_log10() +
     xlab(expression(sigma^2)) +
     ylab('log-likelihood')
 
