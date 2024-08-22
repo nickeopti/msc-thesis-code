@@ -101,7 +101,7 @@ def visualise_mean_sample_path_2d_wide(key: jax.dtypes.prng_key, dp: process.Dif
 
     ys = jax.vmap(compute_path)(jax.random.split(key, n))
     _, n_steps, *_ = ys.shape
-    ys = ys[jnp.logical_and(ys[:, n_steps // 2, 0, 0] > 0, ys[:, n_steps // 2, 1, 0] < 0)]
+    # ys = ys[jnp.logical_and(ys[:, n_steps // 2, 0, 0] > 0, ys[:, n_steps // 2, 1, 0] < 0)]
     n_ys, *_ = ys.shape
     means = jnp.mean(ys, axis=0)
 
@@ -113,11 +113,47 @@ def visualise_mean_sample_path_2d_wide(key: jax.dtypes.prng_key, dp: process.Dif
         plt.plot(*means[:, k].T, color='black', linewidth=1, alpha=1)
         plt.scatter(*means[-1, k], color='black')
 
-    plt.gca().set_xlim(-2, 2)
-    plt.gca().set_ylim(-2, 2)
+    plt.gca().set_xlim(-1.5, 3.5)
+    plt.gca().set_ylim(-1.5, 3.5)
     plt.gca().set_aspect('equal')
     plt.axis('off')
     plt.tight_layout()
+
+
+def animate_mean_sample_path_2d_wide(key: jax.dtypes.prng_key, dp: process.Diffusion, simulator: simulators.Simulator, constraints: Constraints, filename: str, n: int = 100, **kwargs):
+    def compute_path(key):
+        _, ys = simulator.simulate_sample_path(key, dp, constraints.initial, **kwargs)
+        return ys.reshape((-1, *constraints.initial.shape), order='F')
+
+    ys = jax.vmap(compute_path)(jax.random.split(key, n))
+    _, n_steps, *_ = ys.shape
+    # ys = ys[jnp.logical_and(ys[:, n_steps // 2, 0, 0] > 0, ys[:, n_steps // 2, 1, 0] < 0)]
+    n_ys, *_ = ys.shape
+    means = jnp.mean(ys, axis=0)
+
+    for t in range(0, n_steps, n_steps // 100):
+        plt.figure()
+        if t > 0:
+            for i in range(0, n_ys, n_ys // 100):
+                for k in range(constraints.initial.shape[0]):
+                    plt.plot(*ys[i, -t:, k].T, color=f'C{2*k}', linewidth=0.2, alpha=0.2)
+
+            for k in range(constraints.initial.shape[0]):
+                plt.plot(*means[-t:, k].T, color='black', linewidth=1, alpha=1)
+
+        for k in range(constraints.initial.shape[0]):
+            plt.scatter(*constraints.terminal[k], color=f'C{2*k}', marker='o')
+            plt.scatter(*constraints.initial[k], color=f'C{2*k}', marker='*')
+
+        plt.gca().set_xlim(-1.5, 3.5)
+        plt.gca().set_ylim(-1.5, 3.5)
+        plt.gca().set_aspect('equal')
+        plt.axis('off')
+        plt.tight_layout()
+
+        name, extension = os.path.splitext(filename)
+        plt.savefig(f'{name}_{t:03d}{extension}', dpi=300)
+        plt.close()
 
 
 @_plot
@@ -262,7 +298,10 @@ def visualise_shape_paths_3d(key: jax.dtypes.prng_key, dp: process.Diffusion, si
 
         for i in range(k):
             ax_initial.scatter(*ys[0, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', s=1)
-            ax_terminal.scatter(*ys[-1, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', s=1)
+            ax_terminal.scatter(*ys[0, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', s=1, marker='o')
+            ax_terminal.scatter(*ys[-1, [i, k + i, 2 * k + i]], alpha=1, color=f'C{i}', s=1, marker='*')
+
+            ax_terminal.plot(*ys[:, [i, k + i, 2 * k + i]].T, linewidth=0.1, alpha=0.5, color=f'C{i}')
 
     for i in range(k):
         ax_true.scatter(*constraints.terminal[i], alpha=1, color=f'C{i}', s=1)
