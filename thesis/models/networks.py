@@ -42,7 +42,7 @@ class UNet(Network):
     def setup(self) -> None:
         self.down_layers = [nn.Dense(self.dim // 2**r) for r in range(self.reductions + 1)]
         self.up_layers = [nn.Dense(self.dim // 2**r) for r in range(self.reductions - 1, -1, -1)]
-        self.final_layer = nn.Dense(self.dim)
+        self.final_layer = nn.Dense(self.dim, use_bias=False)
 
     def __call__(self, x):
         y = x
@@ -63,13 +63,13 @@ class InverseUNet(Network):
     max_hidden_size: int
 
     def setup(self) -> None:
-        layer_sizes = [2**i for i in range(4, 14)]
+        layer_sizes = [2**i for i in range(4, 16)]
         initial = max(range(len(layer_sizes)), key=lambda i: self.dim < layer_sizes[i])
         terminal = min(range(len(layer_sizes)), key=lambda i: layer_sizes[i] <= self.max_hidden_size)
 
         self.up_layers = [(nn.Dense(dim), self.activation) for dim in layer_sizes[initial:terminal]]
         self.down_layers = [(nn.Dense(dim), self.activation) for dim in layer_sizes[terminal-2:(initial-1 if initial > 0 else None):-1]]
-        self.final_layer = nn.Dense(self.dim)
+        self.final_layer = nn.Dense(self.dim, use_bias=False)
 
     def __call__(self, x):
         y = x
