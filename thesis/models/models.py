@@ -68,6 +68,12 @@ class Long(lightning.Module[State]):
         return optax.chain(optax.adaptive_grad_clip(2), optax.adam(self.learning_rate))
 
 
+class LongVariance(Long):
+    @nn.compact
+    def __call__(self, t, y, c):
+        return self.network(dim=self.dim)(jnp.hstack((t[:, None], y)), c) / t[:, None]
+
+
 class ExactLong(Long):
     def make_training_step(self):
         def training_step(state: State, ts, ys, v, c, offset):
