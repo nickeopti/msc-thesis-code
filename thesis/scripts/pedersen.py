@@ -1,4 +1,6 @@
 import argparse
+import os
+import os.path
 from functools import partial
 from typing import Callable
 
@@ -40,7 +42,7 @@ def conditioned_dp_forwards(sigma: float, dp: Diffusion, constraints: Constraint
     udp = unconditioned_dp(sigma, dp)
 
     return Diffusion(
-        drift=lambda t, y: (constraints.terminal - y) / (t1 - t),
+        drift=lambda t, y: (constraints.terminal.reshape(y.shape, order='F') - y) / (t1 - t),
         diffusion=udp.diffusion,
         inverse_diffusion=udp.inverse_diffusion,
         diffusion_divergence=udp.diffusion_divergence,
@@ -229,7 +231,7 @@ def stable_pedersen_brownian_bridge_offset(key: jax.dtypes.prng_key, t1: float, 
     return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
 
 
-def pedersen_brownian_bridge_reverse(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, dp_bar: Diffusion, simulator: Simulator, M: int, N: int):
+def pedersen_brownian_bridge_reverse(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, dp_bar: Diffusion, simulator: Simulator, M: int, N: int, use_every: int):
     delta = t1 / N
     var = delta
 
@@ -301,7 +303,6 @@ def main():
         ),
         constraints=constraints,
     )
-    assert isinstance(diffusion_process, thesis.experiments.diffusion_processes.Brownian)
     simulator = selector.add_options_from_module(
         parser,
         'simulator',
@@ -321,12 +322,30 @@ def main():
             parser, 'model', thesis.models.models, thesis.lightning.Module,
         )
         model_initialiser = partial(model_initialiser, network=partial(network, activation=nn.gelu), objective=objective())
-        model, state = model_initialiser.func.load_from_checkpoint(
-            checkpoint,
-            dp=diffusion_process.dp,
-            dim=simulator.simulate_sample_path(key, diffusion_process.dp, constraints.initial, t0=0, t1=1, dt=1)[1][0].shape[0],
-            **model_initialiser.keywords,
-        )
+
+        multiple = selector.get_argument(parser, 'multiple', type=bool, default=False)
+        print(multiple)
+        if multiple:
+            states = [
+                (
+                    path.name,
+                    model_initialiser.func.load_from_checkpoint(
+                        os.path.join(path.path, 'checkpoints'),
+                        dp=diffusion_process.dp,
+                        dim=simulator.simulate_sample_path(key, diffusion_process.dp, constraints.initial, t0=0, t1=1, n_steps=1)[1][0].shape[0],
+                        **model_initialiser.keywords,
+                    )[1]
+                )
+                for path in os.scandir(checkpoint) if path.is_dir()
+            ]
+        else:
+            model, state = model_initialiser.func.load_from_checkpoint(
+                checkpoint,
+                dp=diffusion_process.dp,
+                dim=simulator.simulate_sample_path(key, diffusion_process.dp, constraints.initial, t0=0, t1=1, n_steps=1)[1][0].shape[0],
+                **model_initialiser.keywords,
+            )
+
         displacement = selector.get_argument(parser, 'displacement', type=bool)
 
 
@@ -464,7 +483,7 @@ def main():
         f.writelines(f'pedersen_bridge_reverse,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
     # Importance, backwards, learned
-    if checkpoint is not None:
+    if checkpoint is not None and not multiple:
         f = jax.jit(
             lambda key, sigma:
                 pedersen_brownian_bridge_reverse(
@@ -481,12 +500,13 @@ def main():
                                     t[None],
                                     (y - (constraints.initial.reshape(y.shape, order='F') if displacement else 0))[None],
                                     state=state,
-                                    c=sigma
+                                    c=jnp.ones_like(t[None]) * 0.5,
                                 )[0]
                     ),
                     simulator=simulator,
                     M=n_mc,
-                    N=n_s
+                    N=n_s,
+                    use_every=use_every,
                 )
         )
         lls = [
@@ -494,6 +514,35 @@ def main():
         ]
         with open(filename, 'a') as f:
             f.writelines(f'pedersen_bridge_reverse_learned,{p},{ll}\n' for p, ll in zip(sigmas, lls))
+
+    if checkpoint is not None and multiple:
+        for name, state in states:
+            f = jax.jit(
+                lambda key, sigma:
+                    pedersen_brownian_bridge_reverse(
+                        key=key,
+                        t1=1,
+                        constraints=constraints,
+                        dp=unconditioned_dp(sigma**2, dp),
+                        dp_bar=conditioned_dp_backwards(
+                            sigma**2,
+                            dp,
+                            lambda _:
+                                lambda t, y:
+                                    diffusion_process.score_learned(
+                                        t[None],
+                                        (y - (constraints.initial.reshape(y.shape, order='F') if displacement else 0))[None],
+                                        state=state,
+                                        c=jnp.ones_like(t[None]) * sigma,
+                                    )[0]
+                        ),
+                        simulator=simulator,
+                        M=n_mc,
+                        N=n_s,
+                        use_every=use_every,
+                    )
+            )
+            print(f'{name},{f(key, float(name))}')
 
 
 if __name__ == '__main__':

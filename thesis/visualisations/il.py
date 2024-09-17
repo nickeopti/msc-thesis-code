@@ -249,16 +249,18 @@ def visualise_shape_evolution(key: jax.dtypes.prng_key, dp: process.Diffusion, s
     for _ in range(n):
         key, subkey = jax.random.split(key)
 
-        _, ys = simulator.simulate_sample_path(subkey, dp, constraints.initial, **kwargs)
+        ts, ys = simulator.simulate_sample_path(subkey, dp, constraints.initial, **kwargs)
         ys = ys.reshape((-1, k * d), order='F')
 
         for i in range(0, ys.shape[0], 100):
-            ax.plot(_wrap(ys[i, :k]), _wrap(ys[i, k:]), i / ys.shape[0], color=cm(i / ys.shape[0]))
+            ax.plot(_wrap(ys[i, :k]), _wrap(ys[i, k:]), ts[i], color=cm(ts[i]))
+        ax.plot(_wrap(ys[-1, :k]), _wrap(ys[-1, k:]), ts[-1], color=cm(ts[-1]))
 
     ax.elev = 15  # default 30
 
     ax.set_aspect('equalxy')
     ax.set_zlabel('$t$')
+    plt.tight_layout()
 
 
 @_plot
