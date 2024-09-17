@@ -46,10 +46,10 @@ class Experiment:
         self.displacement = displacement
         self.n = n
 
-        if min_diffusion_scale and max_diffusion_scale:
+        if min_diffusion_scale is not None and max_diffusion_scale is not None:
             self.diffusion_scale_range = (min_diffusion_scale, max_diffusion_scale)
             assert self.diffusion_process.c == 1, 'Variance shall be set to 1'
-        elif min_diffusion_scale or max_diffusion_scale:
+        elif min_diffusion_scale is not None or max_diffusion_scale is not None:
             raise ValueError('Either set both or none of {min|max}_diffusion_scale')
         else:
             self.diffusion_scale_range = None
@@ -71,7 +71,7 @@ class Experiment:
 
         if self.diffusion_scale_range is not None:
             c = jax.random.uniform(subkey2, minval=self.diffusion_scale_range[0], maxval=self.diffusion_scale_range[1])
-            diffusion_scale = c
+            diffusion_scale = 10**c
         else:
             c = self.diffusion_process.c
             diffusion_scale = 1
@@ -85,6 +85,8 @@ class Experiment:
     def visualise(self, state: train_state.TrainState, plots_path: pathlib.Path):
         self.key, key = jax.random.split(self.key)
 
+        cs = ([self.diffusion_process.c] if self.diffusion_scale_range is None else jnp.linspace(*self.diffusion_scale_range, 10))
+
         if self.constraints.visualise_paths is not None:
             fs = [
                 (
@@ -95,31 +97,37 @@ class Experiment:
                                 t[None],
                                 (y - (self.constraints.initial.reshape(y.shape, order='F') if self.displacement else 0))[None],
                                 state=state,
-                                c=jnp.array([self.diffusion_process.c])
+                                c=jnp.array([c])
                             )[0]
                     ),
-                    'learned'
+                    10**c,
+                    ('learned' if self.diffusion_scale_range is None else f'learned_c_{10**c:.3}')
                 )
+                for c in cs
             ]
             if hasattr(self.diffusion_process, 'score_analytical'):
-                fs.append(
-                    (
-                        _f_bar(
-                            self.dp,
-                            partial(
-                                self.diffusion_process.score_analytical,
-                                dp=self.dp,
-                                constraints=self.constraints,
-                            )
-                        ),
-                        'analytical'
-                    )
+                fs.extend(
+                    [
+                        (
+                            _f_bar(
+                                self.dp,
+                                partial(
+                                    self.diffusion_process.score_analytical,
+                                    dp=self.dp,
+                                    constraints=self.constraints,
+                                )
+                            ),
+                            10**c,
+                            ('analytical' if self.diffusion_scale_range is None else f'analytical_c_{10**c:.3}')
+                        )
+                        for c in cs
+                    ]
                 )
 
-            for f_bar, name in fs:
+            for f_bar, c, name in fs:
                 dp_bar = process.Diffusion(
                     drift=f_bar,
-                    diffusion=self.dp.diffusion,
+                    diffusion=lambda *args: self.dp.diffusion(*args) * c,
                     inverse_diffusion=None,
                     diffusion_divergence=None,
                 )
@@ -135,16 +143,22 @@ class Experiment:
                     n_steps=1000,
                 )
 
-            self.constraints.visualise_paths(
-                key=key,
-                dp=self.dp,
-                simulator=self.simulator,
-                constraints=self.constraints,
-                filename=plots_path / 'unconditional.png',
-                t0=0,
-                t1=1,
-                n_steps=1000,
-            )
+            for c in cs:
+                self.constraints.visualise_paths(
+                    key=key,
+                    dp=process.Diffusion(
+                        drift=self.dp.drift,
+                        diffusion=lambda *args: self.dp.diffusion(*args) * 10**c,
+                        inverse_diffusion=None,
+                        diffusion_divergence=None,
+                    ),
+                    simulator=self.simulator,
+                    constraints=self.constraints,
+                    filename=plots_path / ('unconditional.png' if self.diffusion_scale_range is None else f'unconditional_c_{10**c:.3}.png'),
+                    t0=0,
+                    t1=1,
+                    n_steps=1000,
+                )
 
         if self.constraints.visualise_field is not None:
             fs = [
