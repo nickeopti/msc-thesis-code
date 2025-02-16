@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from flax.training import train_state
 
 import thesis.processes.process as process
-from thesis.experiments.constraints import Constraints, PointMixtureConstraints
+from thesis.experiments.constraints import Constraints, ConstraintsCollection, PointMixtureConstraints
 from thesis.experiments.diffusion_processes import DiffusionProcess
 from thesis.experiments.simulators import Simulator
 
@@ -54,6 +54,14 @@ class Experiment:
         else:
             self.diffusion_scale_range = None
 
+        self.n_keys = 1
+        if isinstance(self.constraints, PointMixtureConstraints):
+            self.n_keys += 1
+        elif isinstance(self.constraints, ConstraintsCollection):
+            self.n_keys += 2
+        if self.diffusion_scale_range is not None:
+            self.n_keys += 1
+
     @property
     def dp(self) -> process.Diffusion:
         return self.diffusion_process.dp
@@ -62,21 +70,57 @@ class Experiment:
         return self.n
 
     def __getitem__(self, key: jax.dtypes.prng_key) -> jax.Array:
+        subkeys = jax.random.split(key, self.n_keys)
+
         if isinstance(self.constraints, PointMixtureConstraints):
-            initial = jnp.stack((self.constraints.initial_a, self.constraints.initial_b))[jax.random.bernoulli(key).astype(int)]
+            initial = jnp.stack((self.constraints.initial_a, self.constraints.initial_b))[jax.random.bernoulli(subkeys[1]).astype(int)]
+        elif isinstance(self.constraints, ConstraintsCollection):
+            # initial = jax.vmap(
+            #     lambda mean, sd: mean + jax.random.normal(subkeys[2], mean.shape) * sd,
+            #     in_axes=(1, 1),  # TODO: Verify out shape (out_axes)
+            #     # out_axes=(1, 1),
+            # )(self.constraints.initials[jax.random.randint(key=subkeys[1], shape=(1,), minval=0, maxval=len(self.constraints))][0], self.constraints.sd)
+            
+            # initial = self.constraints.initials[jax.random.randint(key=subkeys[1], shape=(1,), minval=0, maxval=len(self.constraints))][0]
+            # print(initial.shape)
+            
+            def scaled_diffusion(diffusion: jax.Array):
+                s = diffusion[0, 0]
+                return diffusion / s * self.constraints.sd.reshape(-1, order='F')[None]
+
+            ts_, ys_ = self.simulator.simulate_sample_path(
+                subkeys[2],
+                process.Diffusion(
+                    drift=self.dp.drift,
+                    diffusion=lambda *args: scaled_diffusion(self.dp.diffusion(*args)),
+                    inverse_diffusion=None,
+                    diffusion_divergence=None,
+                ),
+                self.constraints.initials[jax.random.randint(key=subkeys[1], shape=(1,), minval=0, maxval=len(self.constraints))][0],
+                t0=0,
+                t1=0.5,
+                n_steps=100,
+                diffusion_scale=1 if self.diffusion_scale_range is None else 10**(sum(self.diffusion_scale_range) / 2),
+            )
+            initial = ys_[-1].reshape(self.constraints.initial.shape)
+
+            # jax.random.multivariate_normal(
+            #     subkeys[2],
+            #     self.constraints.initials[jax.random.randint(key=subkeys[1], shape=(1,), minval=0, maxval=len(self.constraints))],
+            #     self.constraints.sd
+            # )
         else:
             initial = self.constraints.initial
 
-        subkey1, subkey2 = jax.random.split(key)
-
         if self.diffusion_scale_range is not None:
-            c = jax.random.uniform(subkey2, minval=self.diffusion_scale_range[0], maxval=self.diffusion_scale_range[1])
+            c = jax.random.uniform(subkeys[-1], minval=self.diffusion_scale_range[0], maxval=self.diffusion_scale_range[1])
             diffusion_scale = 10**c
+            c = (c - self.diffusion_scale_range[0]) / (self.diffusion_scale_range[1] - self.diffusion_scale_range[0])
         else:
             c = self.diffusion_process.c
             diffusion_scale = 1
 
-        ts, ys = self.simulator.simulate_sample_path(subkey1, self.dp, initial, t0=0, t1=1, n_steps=1000, diffusion_scale=diffusion_scale)
+        ts, ys = self.simulator.simulate_sample_path(subkeys[0], self.dp, initial, t0=0, t1=1, n_steps=1000, diffusion_scale=diffusion_scale)
         if self.displacement:
             ys -= initial.reshape(ys[0].shape, order='F')
 
@@ -86,6 +130,9 @@ class Experiment:
         self.key, key = jax.random.split(self.key)
 
         cs = ([self.diffusion_process.c] if self.diffusion_scale_range is None else jnp.linspace(*self.diffusion_scale_range, 10))
+        # initial = self.constraints.initials[jax.random.randint(key=key, shape=(1,), minval=0, maxval=len(self.constraints))][0]
+        # self.constraints.initial = initial
+        initial = self.constraints.initial
 
         if self.constraints.visualise_paths is not None:
             fs = [
@@ -95,9 +142,13 @@ class Experiment:
                         lambda t, y:
                             self.diffusion_process.score_learned(
                                 t[None],
-                                (y - (self.constraints.initial.reshape(y.shape, order='F') if self.displacement else 0))[None],
+                                (
+                                    # (jnp.hstack((initial.reshape(y.shape, order='F'), y - (initial.reshape(y.shape, order='F') if self.displacement else 0)))[None])
+                                    # if isinstance(self.constraints, ConstraintsCollection) else
+                                    ((y - (initial.reshape(y.shape, order='F') if self.displacement else 0))[None])
+                                ),
                                 state=state,
-                                c=jnp.array([c])
+                                c=jnp.array([c if self.diffusion_scale_range is None else (c - self.diffusion_scale_range[0]) / (self.diffusion_scale_range[1] - self.diffusion_scale_range[0])])
                             )[0]
                     ),
                     10**c,

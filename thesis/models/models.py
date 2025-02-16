@@ -68,7 +68,43 @@ class Long(lightning.Module[State]):
         return optax.chain(optax.adaptive_grad_clip(2), optax.adam(self.learning_rate))
 
 
+class LongCollection(Long):
+    def make_training_step(self):
+        def training_step(state: State, ts, ys, v, c, offset):
+            print(ys.shape, v.shape, jnp.tile(jax.vmap(lambda u: u.reshape(ys.shape[2:], order='F'))(v)[:, None], (1, ys.shape[1] - 1, *([1] * (ys.ndim - 2)))).shape)
+            ps = state.apply_fn(
+                state.params,
+                jnp.hstack(ts[:, 1:]),
+                jnp.hstack(
+                    (
+                        # jnp.tile(v.reshape((ys.shape[0], *ys.shape[2:]), order='F'), (ys.shape[1] - 1, *([1] * (ys.ndim - 2)))),
+                        # jnp.tile(jax.vmap(lambda u: u.reshape(ys.shape[2:], order='F'))(v), (ys.shape[1] - 1, *([1] * (ys.ndim - 2)))),
+                        # jnp.tile(jax.vmap(lambda u: u.reshape(ys.shape[2:], order='F'))(v)[:, None], (1, ys.shape[1] - 1, *([1] * (ys.ndim - 2)))),
+                        jnp.vstack(jnp.tile(jax.vmap(lambda u: u.reshape(ys.shape[2:], order='F'))(v)[:, None], (1, ys.shape[1], *([1] * (ys.ndim - 2))))[:, 1:]),
+                        jnp.vstack(ys[:, 1:])
+                    )
+                ),
+                jnp.hstack(jnp.ones_like(ts[:, 1:]) * c[:, None])
+            )
+
+            l = jax.vmap(add_ddid(self.objective, self.dp, offset[0]))(ps, jnp.hstack(ts[:, :-1]), jnp.vstack(ys[:, :-1]), jnp.vstack(ys[:, 1:]), jnp.hstack(ts[:, 1:] - ts[:, :-1]))
+
+            return jnp.mean(l)
+
+        return training_step
+
+    @property
+    def init_params(self):
+        return jnp.ones(100), jnp.ones((100, 2 * self.dim)), jnp.zeros(100)
+
+
 class LongVariance(Long):
+    @nn.compact
+    def __call__(self, t, y, c):
+        return self.network(dim=self.dim)(jnp.hstack((t[:, None], y)), c) / t[:, None]
+
+
+class LongCollectionVariance(LongCollection):
     @nn.compact
     def __call__(self, t, y, c):
         return self.network(dim=self.dim)(jnp.hstack((t[:, None], y)), c) / t[:, None]

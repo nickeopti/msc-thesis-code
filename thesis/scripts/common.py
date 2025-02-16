@@ -23,7 +23,7 @@ from thesis.lightning import loggers, trainer
 selector.arguments.CONVERTER[jax.Array] = partial(jnp.fromstring, sep=',')
 
 
-def _provide_constraints(diffusion_process: partial, constraints: thesis.experiments.constraints.Constraints):
+def _provide_constraints(diffusion_process: partial, constraints: thesis.experiments.constraints.Constraints) -> thesis.experiments.diffusion_processes.DiffusionProcess:
     if 'constraints' in diffusion_process.func.__init__.__code__.co_varnames[:diffusion_process.func.__init__.__code__.co_argcount]:
         return diffusion_process(constraints=constraints)
     else:

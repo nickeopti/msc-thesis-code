@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 import thesis.processes.process as process
-from thesis.experiments import Constraints
+from thesis.experiments import Constraints, ConstraintsCollection
 from thesis.visualisations import il
 
 
@@ -38,6 +38,13 @@ class PointConstraints2D(Constraints):
             partial(il.visualise_mean_sample_path_2d_wide, n=10000),
             # partial(il.animate_mean_sample_path_2d_wide, n=10000),
         )
+
+
+class PointConstraints2DCollection(ConstraintsCollection):
+    def __init__(self, initial_points: jax.Array) -> None:
+        initials = initial_points.reshape((-1, 2), order='F')[:, None, :]
+
+        super().__init__(*initials)
 
 
 class PointMixtureConstraints(Constraints):
@@ -148,6 +155,21 @@ class ButterflyLandmarks(LandmarksConstraints):
         super().__init__(initial, terminal)
 
 
+class ButterflyLandmarksCollection(ConstraintsCollection):
+    def __init__(self, data_path: str, species: str, every: int = 1) -> None:
+        metadata = pd.read_csv(os.path.join(data_path, 'metadata.txt'), sep=';')
+        landmarks = pd.read_csv(os.path.join(data_path, 'aligned.txt'), sep=',', header=None)
+
+        initials = [
+            jnp.array(landmarks.loc[metadata['species'] == s.strip()])[0].reshape((-1, 2))[::every] * 50
+            for s in species.split(',')
+        ]
+
+        super().__init__(*initials)
+
+        self.visualise_paths = il.multiple(partial(il.visualise_shape_paths_2d, n=1), partial(il.visualise_shape_evolution, n=1))
+
+
 class SkullLandmarks(LandmarksConstraints):
     def __init__(self, landmarks_info: str, initial_skull: str, terminal_skull: str, bone: str, every: int = 1) -> None:
         with open(landmarks_info) as csv_file:
@@ -171,4 +193,4 @@ class SkullLandmarks(LandmarksConstraints):
         initial = extract_landmarks(initial_skull) * 100
         terminal = extract_landmarks(terminal_skull) * 100
 
-        super().__init__(initial, terminal)
+        super().__init__(initial[2:], terminal[2:])

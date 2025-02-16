@@ -87,6 +87,33 @@ class InverseUNet(Network):
         return self.final_layer(z + up_values[0])
 
 
+class InverseUNetCollection(Network):
+    dim: int
+    max_hidden_size: int
+
+    def setup(self) -> None:
+        layer_sizes = [2**i for i in range(4, 16)]
+        initial = max(range(len(layer_sizes)), key=lambda i: self.dim < layer_sizes[i])
+        terminal = min(range(len(layer_sizes)), key=lambda i: layer_sizes[i] <= self.max_hidden_size)
+
+        self.up_layers = [(nn.Dense(dim), self.activation) for dim in layer_sizes[initial+1:terminal]]
+        self.down_layers = [(nn.Dense(dim), self.activation) for dim in layer_sizes[terminal-2:(initial-1 if initial > 0 else None):-1]]
+        self.final_layer = nn.Dense(self.dim, use_bias=False)
+
+    def __call__(self, x):
+        y = x
+        up_values = []
+        for layer, activation in self.up_layers:
+            y = activation(layer(y))
+            up_values.append(y)
+
+        z = jnp.zeros_like(y)
+        for y, (layer, activation) in zip(reversed(up_values), self.down_layers):
+            z = activation(layer(z + y))
+
+        return self.final_layer(z)
+
+
 def get_time_embedding(
     embedding_dim: int, max_period: float = 128.0, scaling: float = 100.0
 ):
@@ -127,7 +154,43 @@ class InverseUNetVarianceEmbedding(Network):
         initial = max(range(len(layer_sizes)), key=lambda i: self.dim < layer_sizes[i])
         terminal = min(range(len(layer_sizes)), key=lambda i: layer_sizes[i] <= self.max_hidden_size)
 
-        self.up_layers = [(nn.Dense(dim), self.activation, TimeEmbeddingMLP(dim)) for dim in layer_sizes[initial:terminal]]
+        # self.up_layers = [(nn.Dense(dim), self.activation, TimeEmbeddingMLP(dim)) for dim in layer_sizes[initial:terminal]]
+        self.up_layers = [(nn.Dense(dim), self.activation) for dim in layer_sizes[initial:terminal]]
+        self.down_layers = [(nn.Dense(dim), self.activation, TimeEmbeddingMLP(dim)) for dim in layer_sizes[terminal-2:(initial-1 if initial > 0 else None):-1]]
+        self.final_layer = nn.Dense(self.dim, use_bias=False)
+
+    def __call__(self, x, sigma):
+        variance_embedding = get_time_embedding(self.variance_embedding_dim)
+        sigma_embedding = jax.vmap(variance_embedding, in_axes=0)(sigma)
+
+        y = x
+        up_values = []
+        # for layer, activation, embedder in self.up_layers:
+        for layer, activation in self.up_layers:
+            # scale, shift = embedder(sigma_embedding)
+            # y = activation(layer(y) * (1.0 + scale) + shift)
+            y = activation(layer(y))
+            up_values.append(y)
+
+        z = jnp.zeros_like(y)
+        for y, (layer, activation, embedder) in zip(reversed(up_values), self.down_layers):
+            scale, shift = embedder(sigma_embedding)
+            z = activation(layer(z + y) * (1.0 + scale) + shift)
+
+        return self.final_layer(z + up_values[0])
+
+
+class InverseUNetVarianceCollection(Network):
+    dim: int
+    max_hidden_size: int
+    variance_embedding_dim: int = 32
+
+    def setup(self) -> None:
+        layer_sizes = [2**i for i in range(4, 16)]
+        initial = max(range(len(layer_sizes)), key=lambda i: self.dim < layer_sizes[i])
+        terminal = min(range(len(layer_sizes)), key=lambda i: layer_sizes[i] <= self.max_hidden_size)
+
+        self.up_layers = [(nn.Dense(dim), self.activation, TimeEmbeddingMLP(dim)) for dim in layer_sizes[initial+1:terminal]]
         self.down_layers = [(nn.Dense(dim), self.activation, TimeEmbeddingMLP(dim)) for dim in layer_sizes[terminal-2:(initial-1 if initial > 0 else None):-1]]
         self.final_layer = nn.Dense(self.dim, use_bias=False)
 
@@ -138,8 +201,9 @@ class InverseUNetVarianceEmbedding(Network):
         y = x
         up_values = []
         for layer, activation, embedder in self.up_layers:
-            scale, shift = embedder(sigma_embedding)
-            y = activation(layer(y) * (1.0 + scale) + shift)
+            # scale, shift = embedder(sigma_embedding)
+            # y = activation(layer(y) * (1.0 + scale) + shift)
+            y = activation(layer(y))
             up_values.append(y)
 
         z = jnp.zeros_like(y)
@@ -147,4 +211,4 @@ class InverseUNetVarianceEmbedding(Network):
             scale, shift = embedder(sigma_embedding)
             z = activation(layer(z + y) * (1.0 + scale) + shift)
 
-        return self.final_layer(z + up_values[0])
+        return self.final_layer(z)

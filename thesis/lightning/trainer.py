@@ -97,7 +97,7 @@ class Trainer:
 
                 checkpointer.save(epoch, state)
 
-                if callback is not None and epoch % callback_interval == 0:
+                if callback is not None and epoch % callback_interval == 0 and epoch > 0:
                     callback_function(epoch, state)
 
         except KeyboardInterrupt:

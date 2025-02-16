@@ -8,6 +8,8 @@ data <- read_csv('pedersen.csv', col_types = 'fdd')
 
 names = c(
     analytical = 'analytical',
+    stable_analytical = 'stable analytical',
+    stable_analytical_offset = 'stable analytical, offset',
     pedersen = 'simulated likelihood estimate',
     pedersen_bridge = 'importance sampled estimate',
     pedersen_bridge_reverse = 'importance sampled estimate, reverse',

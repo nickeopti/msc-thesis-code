@@ -27,8 +27,6 @@ from thesis.scripts.common import _provide_constraints
 
 jax.config.update("jax_enable_x64", True)
 
-print(jnp.zeros(10).dtype)
-
 
 def unconditioned_dp(sigma: float, dp: Diffusion) -> Diffusion:
     return Diffusion(
@@ -121,113 +119,47 @@ def pedersen_brownian_bridge_reverse(key: jax.dtypes.prng_key, t1: float, constr
         ts, ys = simulator.simulate_sample_path(key, dp_bar, constraints.terminal, t0=t1, t1=delta, n_steps=N)
         ts = jnp.hstack((t1, ts))
         ys = jnp.vstack((constraints.terminal.reshape(ys[0].shape, order='F')[None], ys))
+        ys = ys.reshape((-1, *constraints.terminal.shape), order='F')
 
-        d = ys[0].shape[1] if len(ys[0].shape) > 1 else 1
+        k = ys[0].shape[0]
 
-        # print(dp.diffusion(ts[0], ys[0])[::use_every, ::use_every].shape)
-        # print(ys[0].reshape(-1, order='F')[::use_every].shape)
-
-        # jax.debug.print(
-        #     'd: {v}',
-        #     v=jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(ts[5], ys[5][::use_every]) @ dp.diffusion(ts[5], ys[5][::use_every]).T, d) * var).shape
-        # )
-        # jax.debug.print(
-        #     'v: {v}',
-        #     v=(ys[6].reshape(-1, order='F') - ys[5].reshape(-1, order='F'))[::use_every].T
-        # )
-        # jax.debug.print(
-        #     'vTd: {v}',
-        #     v=((ys[6].reshape(-1, order='F') - ys[5].reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(ts[5], ys[5][::use_every]) @ dp.diffusion(ts[5], ys[5][::use_every]).T, d) * var))
-        # )
-        # jax.debug.print(
-        #     'vTdv: {v}',
-        #     v=((ys[6].reshape(-1, order='F') - ys[5].reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(ts[5], ys[5][::use_every]) @ dp.diffusion(ts[5], ys[5][::use_every]).T, d) * var) @ (ys[6].reshape(-1, order='F') - ys[5].reshape(-1, order='F'))[::use_every])
-        # )
-        # jax.debug.print(
-        #     'vTdv2: {v}',
-        #     v=((ys[6].reshape(-1, order='F') - ys[5].reshape(-1, order='F'))[::use_every].reshape((1, -1)) @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(ts[5], ys[5][::use_every]) @ dp.diffusion(ts[5], ys[5][::use_every]).T, d) * var) @ (ys[6].reshape(-1, order='F') - ys[5].reshape(-1, order='F'))[::use_every].reshape((-1, 1)))
-        # )
-
-        # jax.debug.print('sigma: {v}', v=dp.diffusion(ts[0], ys[0])[0, 0])
-        # jax.debug.print(
-        #     'f: {v}',
-        #     v=jax.vmap(
-        #         lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y[::use_every]) @ dp.diffusion(t, y[::use_every]).T, d) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F'))[::use_every] / 2,
-        #         in_axes=(0, 0, 0)
-        #     )(ts[:-1], ys[:-1], ys[1:])
-        # )
-        # jax.debug.print(
-        #     's: {v}',
-        #     v=jax.vmap(
-        #         lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y[::use_every]) @ dp_bar.diffusion(t, y[::use_every]).T, d) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'))[::use_every] / 2,
-        #         in_axes=(0, 0, 0)
-        #     )(ts[:-1], ys[:-1], ys[1:])
-        # )
-        # jax.debug.print(
-        #     'diff: {v}',
-        #     v=(
-        #         jax.vmap(
-        #             lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y[::use_every]) @ dp.diffusion(t, y[::use_every]).T, d) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F'))[::use_every] / 2,
-        #             in_axes=(0, 0, 0)
-        #         )(ts[:-1], ys[:-1], ys[1:])
-        #     )
-        #     -
-        #     (
-        #         jax.vmap(
-        #             lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y[::use_every]) @ dp_bar.diffusion(t, y[::use_every]).T, d) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'))[::use_every] / 2,
-        #             in_axes=(0, 0, 0)
-        #         )(ts[:-1], ys[:-1], ys[1:])
-        #     )
-        # )
-        # jax.debug.print(
-        #     '{v}',
-        #     v=jnp.sum(
-        #         jax.vmap(
-        #             lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y[::use_every]) @ dp.diffusion(t, y[::use_every]).T, d) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F'))[::use_every] / 2,
-        #             in_axes=(0, 0, 0)
-        #         )(ts[:-1], ys[:-1], ys[1:])
-        #     )
-        #     -
-        #     jnp.sum(
-        #         jax.vmap(
-        #             lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y[::use_every]) @ dp_bar.diffusion(t, y[::use_every]).T, d) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'))[::use_every] / 2,
-        #             in_axes=(0, 0, 0)
-        #         )(ts[:-1], ys[:-1], ys[1:])
-        #     )
-        # )
-
-        w = jnp.exp(
+        w = (
             jnp.sum(
                 jax.vmap(
-                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - y.reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp.diffusion(t, y[::use_every]) @ dp.diffusion(t, y[::use_every]).T, d) * var) @ (y_next.reshape(-1, order='F') - y.reshape(-1, order='F'))[::use_every] / 2,
+                    lambda t, y, y_next:
+                        jnp.sum(
+                            jax.vmap(
+                                lambda a, b: -(b - a).T @ jnp.linalg.inv(dp.diffusion(t, y)[:k, :k] @ dp.diffusion(t, y)[:k, :k].T * var) @ (b - a) / 2,
+                                in_axes=(1, 1)
+                            )(y, y_next)
+                        ),
                     in_axes=(0, 0, 0)
                 )(ts[:-1], ys[:-1], ys[1:])
             )
             -
             jnp.sum(
                 jax.vmap(
-                    lambda t, y, y_next: -(y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'))[::use_every].T @ jnp.linalg.inv(thesis.processes.process.long_diffusion(dp_bar.diffusion(t, y[::use_every]) @ dp_bar.diffusion(t, y[::use_every]).T, d) * var) @ (y_next.reshape(-1, order='F') - (y - delta * dp_bar.drift(t, y)).reshape(-1, order='F'))[::use_every] / 2,
+                    lambda t, y, y_next:
+                        jnp.sum(
+                            jax.vmap(
+                                lambda a, b, d: -(b - (a + delta * d)).T @ jnp.linalg.inv(dp_bar.diffusion(t, y)[:k, :k] @ dp_bar.diffusion(t, y)[:k, :k].T * var) @ (b - (a + delta * d)) / 2,
+                                in_axes=(1, 1, 1)
+                            )(y, y_next, dp_bar.drift(t, y.reshape(-1, order='F')).reshape(y.shape, order='F'))
+                        ),
                     in_axes=(0, 0, 0)
                 )(ts[:-1], ys[:-1], ys[1:])
             )
         )
         x = ys[-1]
 
-        # jax.debug.print(
-        #     'w: {v}',
-        #     v=w
-        # )
+        return w + jnp.sum(
+            jax.vmap(
+                lambda initial, a: jax.scipy.stats.multivariate_normal.logpdf(initial, a, dp.diffusion(ts[-1], ys[-1])[:k, :k] @ dp.diffusion(ts[-1], ys[-1])[:k, :k].T * var).squeeze(),
+                in_axes=(1, 1)
+            )(constraints.initial, x)
+        )
 
-        # jax.debug.print(
-        #     'l: {v}',
-        #     v=jax.scipy.stats.multivariate_normal.logpdf(constraints.initial.reshape(-1, order='F')[::use_every], x.reshape(-1, order='F')[::use_every], thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1][::use_every]) @ dp.diffusion(ts[-1], ys[-1][::use_every]).T, d) * var).squeeze()
-        # )
-        return {
-            'a': jax.scipy.stats.multivariate_normal.logpdf(constraints.initial.reshape(-1, order='F')[::use_every], x.reshape(-1, order='F')[::use_every], thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1][::use_every]) @ dp.diffusion(ts[-1], ys[-1][::use_every]).T, d) * var).squeeze(),
-            'b': w
-        }
-
-    return jax.scipy.special.logsumexp(**jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
+    return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
 
 
 def main():
@@ -271,7 +203,7 @@ def main():
         model_initialiser = selector.add_options_from_module(
             parser, 'model', thesis.models.models, thesis.lightning.Module,
         )
-        model_initialiser = partial(model_initialiser, network=partial(network, activation=nn.gelu), objective=objective())
+        model_initialiser = partial(model_initialiser, network=partial(network, activation=nn.tanh), objective=objective())
 
         multiple = selector.get_argument(parser, 'multiple', type=bool, default=False)
         print(multiple)
@@ -378,10 +310,10 @@ def main():
                 )
         )
         lls = [
-            f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
+            f(key, sigma) for key, sigma in zip(jax.random.split(key, k), [0.05])
         ]
         with open(filename, 'a') as f:
-            f.writelines(f'pedersen_bridge_reverse_learned,{p},{ll}\n' for p, ll in zip(sigmas, lls))
+            f.writelines(f'pedersen_bridge_reverse_learned,{p},{ll}\n' for p, ll in zip([0.05], lls))
         
     if checkpoint is not None and multiple:
         for name, state in states:

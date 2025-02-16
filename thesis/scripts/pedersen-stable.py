@@ -1,6 +1,4 @@
 import argparse
-import os
-import os.path
 from functools import partial
 from typing import Callable
 
@@ -42,7 +40,7 @@ def conditioned_dp_forwards(sigma: float, dp: Diffusion, constraints: Constraint
     udp = unconditioned_dp(sigma, dp)
 
     return Diffusion(
-        drift=lambda t, y: (constraints.terminal.reshape(y.shape, order='F') - y) / (t1 - t),
+        drift=lambda t, y: (constraints.terminal - y) / (t1 - t),
         diffusion=udp.diffusion,
         inverse_diffusion=udp.inverse_diffusion,
         diffusion_divergence=udp.diffusion_divergence,
@@ -60,16 +58,19 @@ def conditioned_dp_backwards(sigma: float, dp: Diffusion, score: Callable[[Diffu
     )
 
 
-def analytical(dp: Diffusion, sigma: float, constraints: Constraints):
+def analytical(dp: Diffusion, sigma: float, t1: float, constraints: Constraints):
+    d = constraints.initial.shape[1] if len(constraints.initial.shape) > 1 else 1
+
+    # return jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), constraints.initial.reshape(-1, order='F'), sigma * t1 * thesis.processes.process.long_diffusion(dp.diffusion(0, constraints.initial) @ dp.diffusion(0, constraints.initial).T, d))
     return jnp.sum(
         jax.vmap(
             lambda terminal, initial: jax.scipy.stats.multivariate_normal.logpdf(terminal, initial, dp.diffusion(0, constraints.initial) @ dp.diffusion(0, constraints.initial).T * sigma).squeeze(),
             in_axes=(1, 1)
-        )(constraints.terminal, constraints.initial)
+        )(constraints.terminal, constraints.initial) 
     )
 
 
-def stable_analytical(dp: Diffusion, sigma: float, constraints: Constraints):
+def stable_analytical(dp: Diffusion, sigma: float, t1: float, constraints: Constraints):
     k, _ = constraints.shape
 
     def f(terminal, initial):
@@ -87,7 +88,7 @@ def stable_analytical(dp: Diffusion, sigma: float, constraints: Constraints):
     )
 
 
-def stable_analytical_offset(dp: Diffusion, sigma: float, constraints: Constraints):
+def stable_analytical_offset(dp: Diffusion, sigma: float, t1: float, constraints: Constraints):
     k, _ = constraints.shape
 
     def f(terminal, initial):
@@ -102,35 +103,16 @@ def stable_analytical_offset(dp: Diffusion, sigma: float, constraints: Constrain
     )
 
 
-def pedersen(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, simulator: Simulator, M: int, N: int):
+def pedersen(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, sigma: float, simulator: Simulator, M: int, N: int):
     delta = t1 / N
     var = delta
 
-    def f(key):
-        _, ys = simulator.simulate_sample_path(key, dp, constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
-        return analytical(dp, var, LandmarksConstraints(ys[-1], constraints.terminal))
-
-    return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
-
-
-def stable_pedersen(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, sigma: float, simulator: Simulator, M: int, N: int):
-    delta = t1 / N
-    var = delta
+    d = constraints.initial.shape[1] if len(constraints.initial.shape) > 1 else 1
 
     def f(key):
-        _, ys = simulator.simulate_sample_path(key, unconditioned_dp(sigma, dp), constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
-        return stable_analytical(dp, sigma * var, LandmarksConstraints(ys[-1], constraints.terminal))
-
-    return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
-
-
-def stable_pedersen_offset(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, sigma: float, simulator: Simulator, M: int, N: int):
-    delta = t1 / N
-    var = delta
-
-    def f(key):
-        _, ys = simulator.simulate_sample_path(key, unconditioned_dp(sigma, dp), constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
-        return stable_analytical_offset(dp, sigma * var, LandmarksConstraints(ys[-1], constraints.terminal))
+        ts, ys = simulator.simulate_sample_path(key, unconditioned_dp(sigma, dp), constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
+        return stable_analytical(dp, sigma * var, t1, LandmarksConstraints(ys[-1], constraints.terminal))
+        # return jax.scipy.stats.multivariate_normal.logpdf(constraints.terminal.reshape(-1, order='F'), ys[-1].reshape(-1, order='F'), thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]), d) @ thesis.processes.process.long_diffusion(dp.diffusion(ts[-1], ys[-1]), d).T * var)
 
     return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
 
@@ -179,54 +161,6 @@ def pedersen_brownian_bridge(key: jax.dtypes.prng_key, t1: float, constraints: C
                 in_axes=(1, 1)
             )(constraints.terminal, x)
         )
-
-    return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
-
-
-def stable_pedersen_brownian_bridge_offset(key: jax.dtypes.prng_key, t1: float, constraints: Constraints, dp: Diffusion, dp_bar: Diffusion, simulator: Simulator, M: int, N: int, sigma: float):
-    delta = t1 / N
-    var = delta
-
-    def f(key):
-        ts, ys = simulator.simulate_sample_path(key, dp_bar, constraints.initial, t0=0, t1=t1 - delta, n_steps=N)
-        ts = jnp.hstack((0, ts))
-        ys = jnp.vstack((constraints.initial[None], ys))
-
-        def stable_prod(a, b, diffusion):
-            z, *_ = jnp.linalg.lstsq(diffusion, b - a)
-            return z.T @ z
-
-        w = (
-            jnp.sum(
-                jax.vmap(
-                    lambda t, y, y_next:
-                        jnp.sum(
-                            jax.vmap(
-                                # lambda a, b: -(b - a).T @ jnp.linalg.inv(sigma * dp.diffusion(t, y) @ dp.diffusion(t, y).T * var) @ (b - a) / 2,
-                                lambda a, b: -stable_prod(a, b, jnp.sqrt(sigma) * dp.diffusion(t, y) * jnp.sqrt(var)) / 2,
-                                in_axes=(1, 1)
-                            )(y, y_next)
-                        ),
-                    in_axes=(0, 0, 0)
-                )(ts[:-1], ys[:-1], ys[1:])
-            )
-            -
-            jnp.sum(
-                jax.vmap(
-                    lambda t, y, y_next:
-                        jnp.sum(
-                            jax.vmap(
-                                # lambda a, b, d: -(b - (a + delta * d)).T @ jnp.linalg.inv(dp_bar.diffusion(t, y) @ dp_bar.diffusion(t, y).T * var) @ (b - (a + delta * d)) / 2,
-                                lambda a, b, d: -stable_prod(a + delta * d, b, dp_bar.diffusion(t, y) * jnp.sqrt(var)) / 2,
-                                in_axes=(1, 1, 1)
-                            )(y, y_next, dp_bar.drift(t, y))
-                        ),
-                    in_axes=(0, 0, 0)
-                )(ts[:-1], ys[:-1], ys[1:])
-            )
-        )
-
-        return w + stable_analytical_offset(dp, sigma * var, LandmarksConstraints(ys[-1], constraints.terminal))
 
     return jax.scipy.special.logsumexp(jax.vmap(f)(jax.random.split(key, M))) - jnp.log(M)
 
@@ -303,6 +237,7 @@ def main():
         ),
         constraints=constraints,
     )
+    assert isinstance(diffusion_process, thesis.experiments.diffusion_processes.Brownian)
     simulator = selector.add_options_from_module(
         parser,
         'simulator',
@@ -322,30 +257,12 @@ def main():
             parser, 'model', thesis.models.models, thesis.lightning.Module,
         )
         model_initialiser = partial(model_initialiser, network=partial(network, activation=nn.gelu), objective=objective())
-
-        multiple = selector.get_argument(parser, 'multiple', type=bool, default=False)
-        print(multiple)
-        if multiple:
-            states = [
-                (
-                    path.name,
-                    model_initialiser.func.load_from_checkpoint(
-                        os.path.join(path.path, 'checkpoints'),
-                        dp=diffusion_process.dp,
-                        dim=simulator.simulate_sample_path(key, diffusion_process.dp, constraints.initial, t0=0, t1=1, n_steps=1)[1][0].shape[0],
-                        **model_initialiser.keywords,
-                    )[1]
-                )
-                for path in os.scandir(checkpoint) if path.is_dir()
-            ]
-        else:
-            model, state = model_initialiser.func.load_from_checkpoint(
-                checkpoint,
-                dp=diffusion_process.dp,
-                dim=simulator.simulate_sample_path(key, diffusion_process.dp, constraints.initial, t0=0, t1=1, n_steps=1)[1][0].shape[0],
-                **model_initialiser.keywords,
-            )
-
+        model, state = model_initialiser.func.load_from_checkpoint(
+            checkpoint,
+            dp=diffusion_process.dp,
+            dim=simulator.simulate_sample_path(key, diffusion_process.dp, constraints.initial, t0=0, t1=1, dt=1)[1][0].shape[0],
+            **model_initialiser.keywords,
+        )
         displacement = selector.get_argument(parser, 'displacement', type=bool)
 
 
@@ -365,61 +282,106 @@ def main():
 
     dp = diffusion_process.dp
 
-    # Diffusion mean estimation testing
-    def shape(key):
-        ts, ys = simulator.simulate_sample_path(key, dp, constraints.initial, t0=0, t1=1, n_steps=10)
-        return ys[-1]
+    with open('initial.csv', 'w') as f:
+        f.writelines([','.join(map(str, p)) for p in constraints.initial])
+
+    with open('terminal.csv', 'w') as f:
+        f.writelines([','.join(map(str, p)) for p in constraints.terminal])
+
+    diffusion = dp.diffusion(0, constraints.initial)
+    with open('diffusion.csv', 'w') as f:
+        f.writelines([','.join(map(str, p)) for p in diffusion])
+
+    ch = jax.lax.linalg.cholesky(diffusion)
+    print(jnp.any(jnp.isnan(ch)), ch.min(), ch.max())
+    lu, *_ = jax.lax.linalg.lu(diffusion)
+    print(jnp.any(jnp.isnan(lu)), lu.min(), lu.max())
+    q, r = jax.lax.linalg.qr(diffusion)
+    print(jnp.any(jnp.isnan(q)), q.min(), q.max())
+    print(jnp.any(jnp.isnan(r)), r.min(), r.max())
+    print(jnp.linalg.det(q))
+    print(jnp.linalg.det(r))
+    print(jnp.linalg.det(diffusion @ diffusion.T))
+    print(jnp.linalg.slogdet(diffusion @ diffusion.T))
+
+    print(
+        jnp.sum(
+            jax.vmap(
+                lambda terminal, initial: jax.scipy.stats.multivariate_normal.logpdf(terminal, initial, diffusion @ diffusion.T).squeeze(),
+                in_axes=(1, 1)
+            )(constraints.terminal, constraints.initial)
+        ),
+        'stats'
+    )
+
+    def stable_density(x, mu, sigma):
+        k, _ = sigma.shape
+        slogdet = jnp.linalg.slogdet(sigma @ sigma.T)
+        print(slogdet)
+        print(jnp.log(jnp.diagonal(jax.lax.linalg.qr(diffusion @ diffusion.T)[1])).sum())
+        print(2 * jnp.log(jnp.diagonal(jax.lax.linalg.cholesky(diffusion @ diffusion.T))).sum())
+        print(jnp.linalg.slogdet(sigma))
+        print(2 * jnp.log(jnp.diagonal(jax.lax.linalg.qr(diffusion)[1])).sum())
+        print(4 * jnp.log(jnp.diagonal(jax.lax.linalg.cholesky(diffusion))).sum())
+        z = jnp.linalg.solve(diffusion, x - mu)
+        print(z.shape, jnp.dot(z.T, z), z.T @ z)
+        z, *_ = jnp.linalg.lstsq(diffusion, x - mu)
+        print(z.shape, jnp.dot(z.T, z), z.T @ z)
+        print((x - mu).T @ jnp.linalg.inv(diffusion @ diffusion.T) @ (x - mu))
+        z1 = jax.lax.linalg.triangular_solve(jax.lax.linalg.cholesky(diffusion @ diffusion.T), x - mu)
+        z2 = jax.lax.linalg.triangular_solve(jax.lax.linalg.cholesky(diffusion @ diffusion.T), x - mu, lower=True, transpose_a=True)
+        print(z1.T @ z1)
+        print(z2.T @ z2)
+        print()
+        print(-k / 2 * jnp.log(2 * jnp.pi))
+        print(- slogdet.sign * slogdet.logabsdet)
+        print(- 1 / 2 * z.T @ z)
+
+        print()
+        n = mu.shape[-1]
+        print(k, n)
+        L = jax.lax.linalg.cholesky(diffusion @ diffusion.T)
+        y = jnp.vectorize(
+            partial(jax.lax.linalg.triangular_solve, lower=True, transpose_a=True),
+            signature="(n,n),(n)->(n)"
+        )(L, x - mu)
+        v1 = (-1/2 * jnp.einsum('...i,...i->...', y, y) - n/2 * jnp.log(2*jnp.pi)
+                - jnp.log(L.diagonal(axis1=-1, axis2=-2)).sum(-1))
+
+        v2 = -k / 2 * jnp.log(2 * jnp.pi) - slogdet.sign * slogdet.logabsdet / 2 - 1 / 2 * z.T @ z
+
+        print(-1/2 * jnp.einsum('...i,...i->...', y, y))
+        print(- n/2 * jnp.log(2*jnp.pi))
+        print(- jnp.log(L.diagonal(axis1=-1, axis2=-2)).sum(-1))
+        print(jnp.log(jnp.diagonal(jax.lax.linalg.cholesky(diffusion @ diffusion.T))).sum())
+        print(v1, v2, 'comparison')
+        return v2
     
+    print(
+        jnp.sum(
+            jax.vmap(
+                lambda terminal, initial: stable_density(terminal, initial, diffusion),
+                in_axes=(1, 1)
+            )(constraints.terminal, constraints.initial)
+        ),
+        'stable'
+    )
 
-    def ll_to_optimise(initial, terminal):
-        # sigma = dp.diffusion(jnp.zeros(1), initial)[0, 0]
-        # print(sigma)
-        sigma = 0.1
 
-        return stable_pedersen_brownian_bridge_offset(
-            key=key,
-            t1=1,
-            constraints=LandmarksConstraints(initial, terminal),
-            dp=dp,
-            dp_bar=conditioned_dp_forwards(sigma, dp, constraints, 1),
-            simulator=simulator,
-            M=n_mc,
-            N=n_s,
-            sigma=sigma,
-        )
+
+
     
-    shapes = jax.vmap(shape)(jax.random.split(key, 10))
-
-    @jax.jit
-    @jax.grad
-    def f(initial):
-        return jnp.sum(jax.vmap(lambda terminal: ll_to_optimise(initial, terminal))(shapes))
-    
-    mean_shape = jnp.mean(shapes, axis=0)
-    # diffusion_mean_estimate = (constraints.initial + constraints.terminal) / 2
-    diffusion_mean_estimate = constraints.terminal
-    # diffusion_mean_estimate = constraints.initial
-    # diffusion_mean_estimate = mean_shape
-
-    for i in range(10):
-        diffusion_mean_estimate += 0.0001 * f(diffusion_mean_estimate)
-        print(i, jnp.sqrt(jnp.mean((diffusion_mean_estimate - mean_shape)**2)))
-
-    # shape_grad = jax.grad(f)(jnp.mean(shapes, axis=0))
-    # print(f'{shape_grad.shape=}')
-    
-    # End of diffusion mean testing
 
     # Analytical
-    f = jax.jit(lambda sigma: analytical(dp=dp, sigma=sigma, constraints=constraints))
+    f = jax.jit(lambda sigma: analytical(dp=dp, sigma=sigma, t1=1, constraints=constraints))
     lls = [
         f(sigma) for sigma in sigmas
     ]
     with open(filename, 'a') as f:
         f.writelines(f'analytical,{p},{ll}\n' for p, ll in zip(sigmas, lls))
-
+    
     # Analytical, stable
-    f = jax.jit(lambda sigma: stable_analytical(dp=dp, sigma=sigma, constraints=constraints))
+    f = jax.jit(lambda sigma: stable_analytical(dp=dp, sigma=sigma, t1=1, constraints=constraints))
     lls = [
         f(sigma) for sigma in sigmas
     ]
@@ -427,7 +389,7 @@ def main():
         f.writelines(f'stable_analytical,{p},{ll}\n' for p, ll in zip(sigmas, lls))
     
     # Analytical, stable, constant offset
-    f = jax.jit(lambda sigma: stable_analytical_offset(dp=dp, sigma=sigma, constraints=constraints))
+    f = jax.jit(lambda sigma: stable_analytical_offset(dp=dp, sigma=sigma, t1=1, constraints=constraints))
     lls = [
         f(sigma) for sigma in sigmas
     ]
@@ -435,28 +397,12 @@ def main():
         f.writelines(f'stable_analytical_offset,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
     # Pedersen
-    f = jax.jit(lambda key, sigma: pedersen(key=key, t1=1, constraints=constraints, dp=unconditioned_dp(sigma, dp), simulator=simulator, M=n_mc, N=n_s))
+    f = jax.jit(lambda key, sigma: pedersen(key=key, t1=1, constraints=constraints, dp=dp, sigma=sigma, simulator=simulator, M=n_mc, N=n_s))
     lls = [
         f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
     ]
     with open(filename, 'a') as f:
         f.writelines(f'pedersen,{p},{ll}\n' for p, ll in zip(sigmas, lls))
-
-    # Pedersen, stable
-    f = jax.jit(lambda key, sigma: stable_pedersen(key=key, t1=1, constraints=constraints, dp=dp, sigma=sigma, simulator=simulator, M=n_mc, N=n_s))
-    lls = [
-        f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
-    ]
-    with open(filename, 'a') as f:
-        f.writelines(f'pedersen_stable,{p},{ll}\n' for p, ll in zip(sigmas, lls))
-
-    # Pedersen, stable, constant offset
-    f = jax.jit(lambda key, sigma: stable_pedersen_offset(key=key, t1=1, constraints=constraints, dp=dp, sigma=sigma, simulator=simulator, M=n_mc, N=n_s))
-    lls = [
-        f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
-    ]
-    with open(filename, 'a') as f:
-        f.writelines(f'pedersen_stable_offset,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
     # Importance, forwards
     f = jax.jit(lambda key, sigma: pedersen_brownian_bridge(key=key, t1=1, constraints=constraints, dp=unconditioned_dp(sigma, dp), dp_bar=conditioned_dp_forwards(sigma, dp, constraints, 1), simulator=simulator, M=n_mc, N=n_s, sigma=sigma))
@@ -465,14 +411,6 @@ def main():
     ]
     with open(filename, 'a') as f:
         f.writelines(f'pedersen_bridge,{p},{ll}\n' for p, ll in zip(sigmas, lls))
-
-    # Importance, forwards, stable, constant offset
-    f = jax.jit(lambda key, sigma: stable_pedersen_brownian_bridge_offset(key=key, t1=1, constraints=constraints, dp=dp, dp_bar=conditioned_dp_forwards(sigma, dp, constraints, 1), simulator=simulator, M=n_mc, N=n_s, sigma=sigma))
-    lls = [
-        f(key, sigma) for key, sigma in zip(jax.random.split(key, k), sigmas)
-    ]
-    with open(filename, 'a') as f:
-        f.writelines(f'pedersen_bridge_stable_offset,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
     # Importance, backwards
     f = jax.jit(lambda key, sigma: pedersen_brownian_bridge_reverse(key=key, t1=1, constraints=constraints, dp=unconditioned_dp(sigma, dp), dp_bar=conditioned_dp_backwards(sigma, dp, lambda udp: partial(diffusion_process.score_analytical, dp=udp, constraints=constraints)), simulator=simulator, M=n_mc, N=n_s))
@@ -483,7 +421,7 @@ def main():
         f.writelines(f'pedersen_bridge_reverse,{p},{ll}\n' for p, ll in zip(sigmas, lls))
 
     # Importance, backwards, learned
-    if checkpoint is not None and not multiple:
+    if checkpoint is not None:
         f = jax.jit(
             lambda key, sigma:
                 pedersen_brownian_bridge_reverse(
@@ -500,13 +438,12 @@ def main():
                                     t[None],
                                     (y - (constraints.initial.reshape(y.shape, order='F') if displacement else 0))[None],
                                     state=state,
-                                    c=jnp.ones_like(t[None]) * 0.5,
+                                    c=sigma
                                 )[0]
                     ),
                     simulator=simulator,
                     M=n_mc,
-                    N=n_s,
-                    use_every=use_every,
+                    N=n_s
                 )
         )
         lls = [
@@ -514,35 +451,6 @@ def main():
         ]
         with open(filename, 'a') as f:
             f.writelines(f'pedersen_bridge_reverse_learned,{p},{ll}\n' for p, ll in zip(sigmas, lls))
-
-    if checkpoint is not None and multiple:
-        for name, state in states:
-            f = jax.jit(
-                lambda key, sigma:
-                    pedersen_brownian_bridge_reverse(
-                        key=key,
-                        t1=1,
-                        constraints=constraints,
-                        dp=unconditioned_dp(sigma**2, dp),
-                        dp_bar=conditioned_dp_backwards(
-                            sigma**2,
-                            dp,
-                            lambda _:
-                                lambda t, y:
-                                    diffusion_process.score_learned(
-                                        t[None],
-                                        (y - (constraints.initial.reshape(y.shape, order='F') if displacement else 0))[None],
-                                        state=state,
-                                        c=jnp.ones_like(t[None]) * sigma,
-                                    )[0]
-                        ),
-                        simulator=simulator,
-                        M=n_mc,
-                        N=n_s,
-                        use_every=use_every,
-                    )
-            )
-            print(f'{name},{f(key, float(name))}')
 
 
 if __name__ == '__main__':
